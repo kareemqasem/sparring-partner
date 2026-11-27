@@ -18,7 +18,8 @@ Version 1 goal: one working 3-minute round that scores hits and misses.
 - [x] Timed rounds of 1, 2 or 3 minutes with a bell and a results screen
 - [x] Defense mode: it only attacks and builds from single punches to body shots to combinations of two and three; five hits stops the round
 - [x] Cyber theme (black, grey, red) and a spoken welcome
-- [ ] Step 6: test and tune at home
+- [x] 3D replay after a round: two glowing skeletons in a ring, as a full-round side view or a short highlight clip, with a button to save either as a video
+- [ ] Test and tune at home
 
 ## Run it
 
@@ -39,4 +40,7 @@ directly from a folder will not work. Either:
 - `src/opponent.js`: what the opponent does and how your moves affect it; the `LEVELS` numbers set each level's timing and behaviour
 - `src/ring.js`: draws the opponent
 - `src/skeleton.js`: draws the boxer as an anatomical skeleton over the camera picture
+- `src/session.js`: remembers a round for the replay and picks its highlights
+- `src/replay3d.js`: the 3D replay, drawn with its own small 3D camera onto an ordinary canvas
+- `tools/`: draws a replay frame to a picture without a browser, for checking the 3D scene
 - `tests/`: checks for move recognition and opponent behaviour, run with `npm test`

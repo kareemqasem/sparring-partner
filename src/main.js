@@ -5,11 +5,13 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker } from "./pose.js?v=18";
-import { createMoveDetector } from "./moves.js?v=18";
-import { createOpponent } from "./opponent.js?v=18";
-import { drawOpponent } from "./ring.js?v=18";
-import { drawSkeleton } from "./skeleton.js?v=18";
+import { createTracker } from "./pose.js?v=19";
+import { createMoveDetector } from "./moves.js?v=19";
+import { createOpponent } from "./opponent.js?v=19";
+import { drawOpponent } from "./ring.js?v=19";
+import { drawSkeleton } from "./skeleton.js?v=19";
+import { createSession, pickHighlights } from "./session.js?v=19";
+import { createReplay, highlightPlan } from "./replay3d.js?v=19";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -46,6 +48,14 @@ const resultsDetail = document.getElementById("results-detail");
 const resultsList = document.getElementById("results-list");
 const againBtn = document.getElementById("again");
 const closeResultsBtn = document.getElementById("close-results");
+const replayEl = document.getElementById("replay");
+const replayCanvas = document.getElementById("replay-canvas");
+const replayOpenBtn = document.getElementById("replay-open");
+const replayFullBtn = document.getElementById("replay-full");
+const replayHighlightBtn = document.getElementById("replay-highlight");
+const replaySaveBtn = document.getElementById("replay-save");
+const replayCloseBtn = document.getElementById("replay-close");
+const replayStatus = document.getElementById("replay-status");
 
 const MIN_VISIBILITY = 0.5;
 const STANCE = "orthodox";
@@ -234,6 +244,7 @@ const beep = () => tone(880);
 
 function startRecording(drillName) {
   if (round) endRound("quit");
+  closeReplay();
   resultsEl.hidden = true;
   stageEl.classList.remove("sparring");
   const drill = DRILLS[drillName];
@@ -370,8 +381,13 @@ bodyBtn.addEventListener("click", () => startRecording("body"));
 let sparring = false;
 let hitTimer = null;
 
+// The round being recorded for the replay, and the last finished one.
+let recorder = null;
+let lastSession = null;
+
 const opponent = createOpponent({
   onEvent(event) {
+    if (round && recorder) recorder.event(performance.now() - round.startedAt, event);
     if (event.type === "windup") {
       // Warning: a punch is coming. A low tone means it is going to the body.
       tone(event.target === "body" ? 260 : 520, 0.18, "square", 0.25);
@@ -447,6 +463,8 @@ function startRound() {
     endsAt: now + lengthMs,
     lastSecond: null,
   };
+  recorder = createSession({ mode: round.mode, level: round.level, stance: STANCE });
+  closeReplay();
   sparring = true;
   resultsEl.hidden = true;
   for (const el of [levelEl, modeEl, lengthEl]) el.disabled = true;
@@ -470,6 +488,8 @@ function endRound(why) {
   const lasted = Math.min(performance.now(), finished.endsAt) - finished.startedAt;
   const s = opponent.score();
   opponent.stop();
+  if (recorder && why !== "quit") lastSession = recorder.finish(s, lasted);
+  recorder = null;
   round = null;
   sparring = false;
   for (const el of [levelEl, modeEl, lengthEl]) el.disabled = false;
@@ -522,9 +542,113 @@ function tickRound(now) {
   }
 }
 
+// The 3D replay of the last round: watch it, or save it as a video.
+let player = null; // { replay, mode, plan, startedAt, saving }
+
+function playReplay(mode) {
+  if (!player) return;
+  player.mode = mode;
+  player.startedAt = performance.now();
+  replayFullBtn.classList.toggle("on", mode === "full");
+  replayHighlightBtn.classList.toggle("on", mode === "highlight");
+}
+
+function openReplay() {
+  if (!lastSession) return;
+  player = {
+    replay: createReplay(replayCanvas, lastSession),
+    plan: highlightPlan(pickHighlights(lastSession)),
+    mode: "full",
+    startedAt: 0,
+    saving: null,
+  };
+  resultsEl.hidden = true;
+  replayEl.hidden = false;
+  replayStatus.textContent = "";
+  playReplay("highlight");
+  requestAnimationFrame(replayLoop);
+}
+
+function closeReplay() {
+  if (player && player.saving) player.saving.stop();
+  player = null;
+  replayEl.hidden = true;
+}
+
+function replayLoop(now) {
+  if (!player) return;
+  const length = player.mode === "full" ? player.replay.lengthMs : player.plan.lengthMs;
+  let clip = now - player.startedAt;
+  if (clip >= length) {
+    if (player.saving) {
+      player.saving.stop(); // the video is complete
+      player.saving = null;
+    }
+    player.startedAt = now; // play it again from the top
+    clip = 0;
+  }
+  if (player.mode === "full") {
+    player.replay.draw(clip, { title: "full round" });
+  } else {
+    const shot = player.plan.at(clip);
+    player.replay.draw(shot.t, { orbit: shot.orbit, zoom: shot.zoom, title: "highlight" });
+  }
+  if (player.saving) {
+    replayStatus.textContent =
+      "Recording " + Math.round((100 * clip) / length) + "%. Keep this tab open and in front.";
+  }
+  requestAnimationFrame(replayLoop);
+}
+
+// Films the replay canvas as it plays through once, then downloads the file.
+function saveReplay() {
+  if (!player || player.saving) return;
+  if (!window.MediaRecorder || !replayCanvas.captureStream) {
+    replayStatus.textContent = "This browser cannot save video. Try Chrome or Edge.";
+    return;
+  }
+  const formats = ["video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
+  const format = formats.find((f) => MediaRecorder.isTypeSupported(f));
+  if (!format) {
+    replayStatus.textContent = "This browser cannot save video. Try Chrome or Edge.";
+    return;
+  }
+  const mode = player.mode;
+  const chunks = [];
+  const film = new MediaRecorder(replayCanvas.captureStream(30), { mimeType: format, videoBitsPerSecond: 6000000 });
+  film.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  film.onstop = () => {
+    for (const b of [replayFullBtn, replayHighlightBtn, replaySaveBtn]) b.disabled = false;
+    if (chunks.length === 0) {
+      replayStatus.textContent = "Nothing was recorded.";
+      return;
+    }
+    const ending = format.startsWith("video/mp4") ? "mp4" : "webm";
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob(chunks, { type: format }));
+    link.download = "code-of-war-" + (mode === "full" ? "round" : "highlight") + "." + ending;
+    link.click();
+    replayStatus.textContent = "Saved " + link.download + " to your downloads.";
+  };
+  for (const b of [replayFullBtn, replayHighlightBtn, replaySaveBtn]) b.disabled = true;
+  player.saving = film;
+  player.startedAt = performance.now(); // film it from the first frame
+  film.start(500);
+}
+
+replayOpenBtn.addEventListener("click", openReplay);
+replayFullBtn.addEventListener("click", () => playReplay("full"));
+replayHighlightBtn.addEventListener("click", () => playReplay("highlight"));
+replaySaveBtn.addEventListener("click", saveReplay);
+replayCloseBtn.addEventListener("click", () => {
+  closeReplay();
+  resultsEl.hidden = false;
+});
+
 sparBtn.addEventListener("click", () => (round ? endRound("quit") : startRound()));
 againBtn.addEventListener("click", startRound);
 closeResultsBtn.addEventListener("click", () => {
+  closeReplay();
   resultsEl.hidden = true;
   stageEl.classList.remove("sparring");
 });
@@ -581,6 +705,10 @@ function run(tracker) {
       setStatus(describeView(points));
       detector.update(frame, now);
       record(frame, now);
+      if (round && recorder) {
+        const head = detector.head();
+        recorder.frame(now - round.startedAt, frame ? frame.world : null, head ? head.y : NaN, opponent.view(now));
+      }
 
       const d = detector.debug();
       const n = (v) => v.toFixed(1);

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>The Code of War</title>
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
   <main>
@@ -27,9 +27,21 @@
         <p id="results-detail"></p>
         <dl id="results-list"></dl>
         <div id="results-buttons">
-          <button id="again" type="button">Go again</button>
+          <button id="replay-open" type="button">3D replay</button>
+          <button id="again" type="button" class="quiet">Go again</button>
           <button id="close-results" type="button" class="quiet">Close</button>
         </div>
+      </div>
+
+      <div id="replay" hidden>
+        <canvas id="replay-canvas" width="1280" height="720"></canvas>
+        <div id="replay-bar">
+          <button id="replay-full" type="button" class="quiet">Full round</button>
+          <button id="replay-highlight" type="button" class="quiet">Highlight</button>
+          <button id="replay-save" type="button">Save as video</button>
+          <button id="replay-close" type="button" class="quiet">Close</button>
+        </div>
+        <p id="replay-status"></p>
       </div>
     </div>
 
@@ -71,9 +83,9 @@
 
     <p id="moves" aria-live="off"></p>
     <p id="debug"></p>
-    <p id="version">Version 18</p>
+    <p id="version">Version 19</p>
   </main>
 
-  <script type="module" src="src/main.js?v=18"></script>
+  <script type="module" src="src/main.js?v=19"></script>
 </body>
 </html>

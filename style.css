@@ -340,3 +340,46 @@ input[type="checkbox"] { accent-color: var(--red); }
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+
+/* The 3D replay, shown over the stage after a round. */
+#replay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px;
+  background: var(--black);
+}
+
+#replay[hidden] { display: none; }
+
+#replay-canvas {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+}
+
+#replay-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+#replay-bar button.on {
+  border-color: #fff;
+  color: #fff;
+}
+
+#replay-status {
+  min-height: 18px;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
