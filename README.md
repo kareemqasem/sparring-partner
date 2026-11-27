@@ -38,4 +38,5 @@ directly from a folder will not work. Either:
 - `src/moves.js`: turns tracked points into moves; the `TUNING` numbers at the top control sensitivity
 - `src/opponent.js`: what the opponent does and how your moves affect it; the `LEVELS` numbers set each level's timing and behaviour
 - `src/ring.js`: draws the opponent
+- `src/skeleton.js`: draws the boxer as an anatomical skeleton over the camera picture
 - `tests/`: checks for move recognition and opponent behaviour, run with `npm test`

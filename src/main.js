@@ -5,10 +5,11 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=17";
-import { createMoveDetector } from "./moves.js?v=17";
-import { createOpponent } from "./opponent.js?v=17";
-import { drawOpponent } from "./ring.js?v=17";
+import { createTracker } from "./pose.js?v=18";
+import { createMoveDetector } from "./moves.js?v=18";
+import { createOpponent } from "./opponent.js?v=18";
+import { drawOpponent } from "./ring.js?v=18";
+import { drawSkeleton } from "./skeleton.js?v=18";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -49,34 +50,14 @@ const closeResultsBtn = document.getElementById("close-results");
 const MIN_VISIBILITY = 0.5;
 const STANCE = "orthodox";
 
-// The voice. Browsers supply their own voices, and which ones exist differs
-// by device, so this looks for a female English one and falls back to
-// whatever English voice there is. A lowered rate and raised pitch make it
-// sound more synthetic.
-const FEMALE_VOICE = /female|zira|samantha|victoria|karen|moira|tessa|fiona|serena|susan|hazel|aria|jenny|sonia|libby/i;
-let chosenVoice = null;
-
-function chooseVoice() {
-  if (!("speechSynthesis" in window)) return;
-  const english = window.speechSynthesis.getVoices().filter((v) => /^en/i.test(v.lang));
-  chosenVoice = english.find((v) => FEMALE_VOICE.test(v.name)) || english[0] || null;
-}
-
-if ("speechSynthesis" in window) {
-  chooseVoice();
-  // Voices often arrive a moment after the page loads.
-  window.speechSynthesis.addEventListener("voiceschanged", chooseVoice);
-}
-
-// Says something out loud. A new line cuts off the previous one so the
-// voice keeps up with fast combinations. `calm` is for full sentences.
+// Says something out loud, in the browser's own voice. A new line cuts off
+// the previous one so the voice keeps up with fast combinations. `calm` is
+// for full sentences, spoken at normal speed.
 function say(text, { calm = false } = {}) {
   if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
   const words = new SpeechSynthesisUtterance(text);
-  if (chosenVoice) words.voice = chosenVoice;
-  words.rate = calm ? 0.92 : 1.35;
-  words.pitch = 1.15;
+  words.rate = calm ? 1 : 1.4;
   if (synth.speaking || synth.pending) {
     // Some browsers drop a call-out made straight after a cancel.
     synth.cancel();
@@ -130,33 +111,10 @@ function isSeen(point) {
   return point && (point.visibility ?? 1) >= MIN_VISIBILITY;
 }
 
+// Draws the boxer as a glowing skeleton over the camera picture.
 function draw(points) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!points) return;
-
-  const px = (p) => [p.x * canvas.width, p.y * canvas.height];
-
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = "#ffffff";
-  for (const [from, to] of BONES) {
-    const a = points[from];
-    const b = points[to];
-    if (!isSeen(a) || !isSeen(b)) continue;
-    ctx.beginPath();
-    ctx.moveTo(...px(a));
-    ctx.lineTo(...px(b));
-    ctx.stroke();
-  }
-
-  for (const [name, point] of Object.entries(points)) {
-    if (!isSeen(point)) continue;
-    const isHand = name.endsWith("Wrist");
-    const [x, y] = px(point);
-    ctx.fillStyle = isHand ? "#ff2d3d" : "#ffffff";
-    ctx.beginPath();
-    ctx.arc(x, y, isHand ? 12 : 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  drawSkeleton(ctx, points, canvas.width, canvas.height, { colour: "#ffffff", glow: "#ffffff" });
 }
 
 // What the boxer needs in view for sparring: head, both shoulders, both hands.

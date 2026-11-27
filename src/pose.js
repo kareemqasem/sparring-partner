@@ -15,6 +15,8 @@ const MODEL_URL =
 // Indexes of the points boxing cares about, in MediaPipe's numbering.
 export const POINTS = {
   nose: 0,
+  leftEar: 7,
+  rightEar: 8,
   leftShoulder: 11,
   rightShoulder: 12,
   leftElbow: 13,
