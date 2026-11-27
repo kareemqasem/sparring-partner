@@ -111,3 +111,9 @@ button:disabled {
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
+
+#version {
+  margin: 8px 0 0;
+  color: #5d606a;
+  font-size: 12px;
+}

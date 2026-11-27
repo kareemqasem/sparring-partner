@@ -1,8 +1,12 @@
 // Steps 1 and 2 of the plan: turn on the camera, track the boxer's body,
 // and call out each move it recognises so we can check it by ear.
 
-import { createTracker, BONES } from "./pose.js";
-import { createMoveDetector } from "./moves.js";
+// When you change any file, raise the version number here and in index.html
+// (all the "?v=" numbers and the "Version" line), so browsers load the new
+// files instead of old saved copies.
+
+import { createTracker, BONES } from "./pose.js?v=5";
+import { createMoveDetector } from "./moves.js?v=5";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
