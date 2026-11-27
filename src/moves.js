@@ -1,8 +1,8 @@
 // Step 2 of the plan: turn tracked body points into boxing moves.
 //
 // Feed it one frame at a time with update(frame, timeMs). It calls onMove
-// with one of: "jab", "cross", "left hook", "right hook", "slip left",
-// "slip right", "block".
+// with one of: "jab", "cross", "left hook", "right hook", "body shot",
+// "slip left", "slip right", "block".
 //
 // Distances are measured against the boxer's own body (shoulder widths),
 // so the same numbers work near the camera or far from it.
@@ -39,6 +39,14 @@ export const TUNING = {
   rearElbowUp: 0.1,
   rearMinSpeed: 6,
   rearFistAboveElbow: 0.25,
+
+  // Body punches. The elbow stays down by the ribs and the fist drops well
+  // below the shoulder line (in guard it sits about 0.2 below).
+  bodyFist: -0.75,        // fist at least this far below the shoulder line
+  bodyElbowUp: -0.42,     // elbow never rises above this
+  bodyMinSpeed: 5,
+  bodyOtherElbowUp: 0.1,  // the other arm is not busy throwing a head punch
+  bodyRepeatMs: 900,      // both arms swing in one body punch; count it once
 
   // Slips: the head moves quickly sideways and dips while both elbows stay down.
   slipDistance: 0.3,      // head travel sideways, in body widths
@@ -82,6 +90,7 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   const widths = [];
   let lastTime = null;
   let lastPunchAt = -Infinity;
+  let lastBodyAt = -Infinity;
 
   let headNow = null;
   let headTrail = [];
@@ -95,6 +104,10 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   const straightName = (side) => (side === leadSide ? "jab" : "cross");
 
   function call(hand, move, time) {
+    if (move === "body shot") {
+      if (time - lastBodyAt < T.bodyRepeatMs) return;
+      lastBodyAt = time;
+    }
     hand.cooldownUntil = time + T.cooldownMs;
     lastPunchAt = time;
     slipPending = null;
@@ -121,6 +134,16 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
 
   // Decides what a finished swing was. Returns a move name or null.
   function classify(side, s) {
+    // A body punch. Crouched, both arms move a lot and the camera cannot
+    // reliably say which hand threw it or whether it was a straight or a
+    // hook, so it is reported simply as a body shot.
+    const isBody =
+      s.lowestFist <= T.bodyFist &&
+      s.peakElbowUp <= T.bodyElbowUp &&
+      s.otherElbowUp < T.bodyOtherElbowUp &&
+      s.peakSpeed >= T.bodyMinSpeed;
+    if (isBody) return "body shot";
+
     if (side === leadSide) {
       if (s.peakElbowUp >= T.leadStraightElbowUp) {
         return s.peakReach >= T.leadShortJabReach ? straightName(side) : null;
@@ -177,6 +200,7 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
         peakReach: 0,
         peakElbowUp: -Infinity,
         peakWristUp: -Infinity,
+        lowestFist: Infinity,
         otherElbowUp: -Infinity,
         called: false,
       };
@@ -188,6 +212,7 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
     s.peakElbowUp = Math.max(s.peakElbowUp, hand.elbowUp);
     s.peakWristUp = Math.max(s.peakWristUp, hand.wristUp);
     s.otherElbowUp = Math.max(s.otherElbowUp, other.elbowUp);
+    s.lowestFist = Math.min(s.lowestFist, hand.wristUp);
 
     // A straight punch is called the moment the arm snaps straight,
     // without waiting for the hand to stop.
