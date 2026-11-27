@@ -13,8 +13,8 @@ Version 1 goal: one working 3-minute round that scores hits and misses.
 - [x] Step 0: project setup
 - [x] Step 1: camera and body tracking (skeleton drawn over the video)
 - [x] Step 2: recognise moves (jab, cross, hook, slip, block), spoken out loud. Tuned on one labelled recording of one boxer; needs checking on fresh recordings. Punches to the body are not handled yet.
-- [ ] Step 3: on-screen opponent
-- [ ] Step 4: scoring
+- [x] Step 3: on-screen opponent (simple boxer figure; winds up before punching, drops its guard to be hit)
+- [ ] Step 4: scoring (basic counts are in: landed, avoided, hits taken)
 - [ ] Step 5: 3-minute round with timer and summary
 - [ ] Step 6: test and tune at home
 
@@ -34,4 +34,6 @@ directly from a folder will not work. Either:
 - `src/main.js`: camera, drawing, and the main loop
 - `src/pose.js`: body tracking (MediaPipe Pose Landmarker)
 - `src/moves.js`: turns tracked points into moves; the `TUNING` numbers at the top control sensitivity
-- `tests/`: checks for move recognition, run with `npm test`
+- `src/opponent.js`: what the opponent does and how your moves affect it; the `OPPONENT` numbers set its timing
+- `src/ring.js`: draws the opponent
+- `tests/`: checks for move recognition and opponent behaviour, run with `npm test`

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sparring Partner</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <main>
@@ -14,24 +14,36 @@
     </header>
 
     <div id="stage">
-      <video id="camera" playsinline muted></video>
-      <canvas id="overlay"></canvas>
+      <canvas id="ring"></canvas>
+      <div id="you">
+        <video id="camera" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
       <div id="flash"></div>
+      <div id="score" hidden></div>
     </div>
 
     <div id="controls">
       <button id="start" type="button">Start camera</button>
-      <button id="punches" type="button" hidden>Punch recording (65 seconds)</button>
-      <button id="guided" type="button" hidden>Guided recording (75 seconds)</button>
-      <button id="record" type="button" hidden>Free recording (15 seconds)</button>
+      <button id="spar" type="button" hidden>Start sparring</button>
+      <label id="callouts" hidden><input id="voice" type="checkbox" checked> Call out my moves</label>
       <span id="readout"></span>
     </div>
 
+    <details id="tools" hidden>
+      <summary>Tuning tools</summary>
+      <div id="tool-buttons">
+        <button id="punches" type="button">Punch recording (65 seconds)</button>
+        <button id="guided" type="button">Guided recording (75 seconds)</button>
+        <button id="record" type="button">Free recording (15 seconds)</button>
+      </div>
+    </details>
+
     <p id="moves" aria-live="off"></p>
     <p id="debug"></p>
-    <p id="version">Version 9</p>
+    <p id="version">Version 10</p>
   </main>
 
-  <script type="module" src="src/main.js?v=9"></script>
+  <script type="module" src="src/main.js?v=10"></script>
 </body>
 </html>

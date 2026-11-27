@@ -1,12 +1,14 @@
-// Steps 1 and 2 of the plan: turn on the camera, track the boxer's body,
-// and call out each move it recognises so we can check it by ear.
+// Ties everything together: the camera, body tracking, move recognition,
+// the opponent, and the tuning tools.
 
 // When you change any file, raise the version number here and in index.html
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=9";
-import { createMoveDetector } from "./moves.js?v=9";
+import { createTracker, BONES } from "./pose.js?v=10";
+import { createMoveDetector } from "./moves.js?v=10";
+import { createOpponent } from "./opponent.js?v=10";
+import { drawOpponent } from "./ring.js?v=10";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -22,6 +24,14 @@ const guidedBtn = document.getElementById("guided");
 const punchesBtn = document.getElementById("punches");
 const recordButtons = [recordBtn, guidedBtn, punchesBtn];
 const debugEl = document.getElementById("debug");
+const stageEl = document.getElementById("stage");
+const ringCanvas = document.getElementById("ring");
+const ringCtx = ringCanvas.getContext("2d");
+const sparBtn = document.getElementById("spar");
+const scoreEl = document.getElementById("score");
+const voiceBox = document.getElementById("voice");
+const calloutsEl = document.getElementById("callouts");
+const toolsEl = document.getElementById("tools");
 
 const MIN_VISIBILITY = 0.5;
 const STANCE = "orthodox";
@@ -183,31 +193,39 @@ function guidedPlan(drill) {
   return { events, cues, blocks, lengthMs: t + 500 };
 }
 
-// A short beep. Unlike the voice it plays instantly, so it marks time exactly.
+// Short sounds. Unlike the voice they play instantly, so they mark time exactly.
 let audio = null;
-function beep() {
-  if (!audio) return;
-  const tone = audio.createOscillator();
-  const volume = audio.createGain();
-  tone.frequency.value = 880;
-  volume.gain.setValueAtTime(0.4, audio.currentTime);
-  volume.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.15);
-  tone.connect(volume).connect(audio.destination);
-  tone.start();
-  tone.stop(audio.currentTime + 0.15);
+
+// Sound can only be switched on from a button press, so call this in one.
+function unlockSound() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!audio && AudioContext) audio = new AudioContext();
+  if (audio && audio.state === "suspended") audio.resume();
 }
 
+function tone(pitch, seconds = 0.15, shape = "sine", loudness = 0.4) {
+  if (!audio) return;
+  const source = audio.createOscillator();
+  const volume = audio.createGain();
+  source.type = shape;
+  source.frequency.value = pitch;
+  volume.gain.setValueAtTime(loudness, audio.currentTime);
+  volume.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + seconds);
+  source.connect(volume).connect(audio.destination);
+  source.start();
+  source.stop(audio.currentTime + seconds);
+}
+
+const beep = () => tone(880);
+
 function startRecording(drillName) {
+  if (sparring) setSparring(false);
   const drill = DRILLS[drillName];
   const guided = Boolean(drill);
   const plan = guided
     ? guidedPlan(drill)
     : { events: [], cues: [], blocks: [], lengthMs: FREE_LENGTH_MS };
-  // Sound can only be switched on from a button press, which this is.
-  if (!audio && (window.AudioContext || window.webkitAudioContext)) {
-    audio = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (audio && audio.state === "suspended") audio.resume();
+  unlockSound();
   recording = {
     guided,
     drill: drillName,
@@ -302,17 +320,94 @@ recordBtn.addEventListener("click", () => startRecording(null));
 guidedBtn.addEventListener("click", () => startRecording("all"));
 punchesBtn.addEventListener("click", () => startRecording("punches"));
 
+// Sparring: the opponent, what you see and hear when things happen, and the score.
+let sparring = false;
+let hitTimer = null;
+
+const opponent = createOpponent({
+  onEvent(event) {
+    if (event.type === "windup") {
+      tone(520, 0.18, "square", 0.25); // warning: a punch is coming
+    } else if (event.type === "open") {
+      tone(1320, 0.12);                // its guard is down: hit it
+    } else if (event.type === "strike") {
+      if (event.result === "hit") {
+        flash("hit!");
+        tone(110, 0.35, "sawtooth", 0.5);
+        stageEl.classList.add("hit");
+        clearTimeout(hitTimer);
+        hitTimer = setTimeout(() => stageEl.classList.remove("hit"), 250);
+      } else {
+        flash(event.result);
+        tone(700, 0.1);
+      }
+    } else if (event.type === "landed") {
+      flash("landed!");
+      tone(1760, 0.2, "triangle", 0.5);
+    } else if (event.type === "blocked") {
+      tone(300, 0.08, "square", 0.2);
+    }
+    showScore();
+  },
+});
+
+function showScore() {
+  const s = opponent.score();
+  scoreEl.innerHTML = "";
+  for (const text of ["Landed " + s.landed, "Avoided " + s.avoided, "Hits taken " + s.taken]) {
+    const part = document.createElement("span");
+    part.textContent = text;
+    scoreEl.append(part);
+  }
+}
+
+function setSparring(on) {
+  sparring = on;
+  stageEl.classList.toggle("sparring", on);
+  scoreEl.hidden = !on;
+  sparBtn.textContent = on ? "Stop sparring" : "Start sparring";
+  toolsEl.hidden = on;
+  if (on) {
+    unlockSound();
+    // While sparring the sounds do the talking, unless you ask for call-outs.
+    voiceBox.checked = false;
+    opponent.start(performance.now());
+    showScore();
+  } else {
+    opponent.stop();
+    stageEl.classList.remove("hit");
+  }
+}
+
+sparBtn.addEventListener("click", () => setSparring(!sparring));
+
+function drawRing(now) {
+  if (!sparring) return;
+  const box = ringCanvas.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  const width = Math.round(box.width * scale);
+  const height = Math.round(box.height * scale);
+  if (ringCanvas.width !== width || ringCanvas.height !== height) {
+    ringCanvas.width = width;
+    ringCanvas.height = height;
+  }
+  drawOpponent(ringCtx, width, height, opponent.view(now), now);
+}
+
 function run(tracker) {
   const detector = createMoveDetector({
     stance: STANCE,
     onMove(move) {
+      const now = performance.now();
+      const guided = recording && recording.guided;
       // During a guided recording the voice belongs to the call-outs.
-      if (!(recording && recording.guided)) {
-        say(move);
-        flash(move);
+      if (!guided) {
+        if (voiceBox.checked) say(move);
+        if (!sparring) flash(move);
         showMove(move);
       }
-      if (recording) recording.moves.push({ t: Math.round(performance.now() - recording.start), move });
+      if (sparring) opponent.playerMove(move, now);
+      if (recording) recording.moves.push({ t: Math.round(now - recording.start), move });
     },
   });
 
@@ -321,6 +416,11 @@ function run(tracker) {
   let fpsStart = performance.now();
 
   function loop() {
+    // The opponent keeps moving every screen refresh, even between camera frames.
+    const tick = performance.now();
+    opponent.update(tick, { blocking: detector.isBlocking() });
+    drawRing(tick);
+
     if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
       const now = performance.now();
@@ -372,7 +472,9 @@ startBtn.addEventListener("click", async () => {
     setStatus("Loading body tracking. The first time takes a few seconds...");
     const tracker = await createTracker();
     startBtn.hidden = true;
-    for (const button of recordButtons) button.hidden = false;
+    sparBtn.hidden = false;
+    calloutsEl.hidden = false;
+    toolsEl.hidden = false;
     say("Ready");
     flash("ready");
     run(tracker);
