@@ -6,20 +6,22 @@
 // sideways from its centre line and down from the top of its head. The
 // figure's right side (its liver side) is on the left of the screen.
 
+// Cyber look: a dark grey figure on black, with red as the only colour.
 const COLORS = {
-  shirt: "#3b4252",
-  shirtShade: "#2c323f",
-  shirtOpen: "#2e7d5b",   // chest lights up green when the whole guard is down
-  skin: "#e0b089",
-  skinShade: "#b98a64",
-  skinLight: "#f1cba8",
-  glove: "#c62828",
-  gloveLight: "#ef5350",
-  gloveWarn: "#ff9800",   // the loading glove turns orange as a warning
-  gloveWarnLight: "#ffc166",
+  shirt: "#1d1f23",
+  shirtShade: "#121316",
+  shirtOpen: "#5a1018",   // chest glows dark red when the whole guard is down
+  skin: "#8f9298",
+  skinShade: "#5c5f65",
+  skinLight: "#c9cbd0",
+  glove: "#ff2d3d",
+  gloveLight: "#ff7f89",
+  gloveWarn: "#ffffff",   // the loading glove turns white as a warning
+  gloveWarnLight: "#ffffff",
+  warnRing: "#ff2d3d",
   hurt: "#ffffff",
-  outline: "#0b0c0f",
-  target: "#7dffb8",
+  outline: "#3a3d43",
+  target: "#ff2d3d",
 };
 
 const lerp = (a, b, k) => a + (b - a) * k;
@@ -283,7 +285,7 @@ export function drawOpponent(ctx, width, height, view, time) {
 
     if (warning) {
       // A ring that closes in on the glove: when it touches, the punch lands.
-      ring(gx, gy, radius * (1 + 2.2 * (1 - view.progress)), COLORS.gloveWarn, Math.max(3, size * 0.01));
+      ring(gx, gy, radius * (1 + 2.2 * (1 - view.progress)), COLORS.warnRing, Math.max(3, size * 0.012));
     }
     disc(gx, gy, radius, warning ? COLORS.gloveWarn : COLORS.glove);
     disc(gx - radius * 0.3, gy - radius * 0.35, radius * 0.35, warning ? COLORS.gloveWarnLight : COLORS.gloveLight);

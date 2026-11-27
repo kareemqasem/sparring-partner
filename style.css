@@ -1,10 +1,25 @@
+/* Cyber theme: black and grey, with red as the only highlight. */
+:root {
+  --black: #050506;
+  --panel: #0e0f11;
+  --panel-2: #17181b;
+  --line: #2b2d31;
+  --line-bright: #4a4d53;
+  --text: #e8e8ea;
+  --muted: #8f9298;
+  --dim: #5c5f65;
+  --red: #ff2d3d;
+  --red-dim: #7a121b;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: #101114;
-  color: #f2f2f2;
+  background: var(--black);
+  color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -15,28 +30,42 @@ main {
 }
 
 h1 {
-  margin: 0 0 4px;
-  font-size: 22px;
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 20px;
   font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+h1::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 12px;
+  background: var(--red);
+  box-shadow: 0 0 12px var(--red);
 }
 
 #status {
   margin: 0 0 12px;
-  color: #b7b9c0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
-#status.error { color: #ff8a80; }
+#status.error { color: var(--red); }
 
 #stage {
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
   background: #000;
-  border-radius: 12px;
+  border: 1px solid var(--line);
   overflow: hidden;
 }
 
-/* Your camera picture. It fills the stage until sparring starts, then
+/* Your camera picture. It fills the stage until a round starts, then
    shrinks into the corner so the opponent has the screen. */
 #you {
   position: absolute;
@@ -49,11 +78,11 @@ h1 {
   inset: auto 12px 12px auto;
   width: 26%;
   height: 26%;
-  border: 2px solid #3a3d46;
-  border-radius: 8px;
+  border: 1px solid var(--line-bright);
 }
 
-/* Mirrored, so moving your right hand moves the right side of the picture. */
+/* Mirrored, so moving your right hand moves the right side of the picture.
+   Greyed, to sit inside the black and grey look. */
 #camera,
 #overlay {
   position: absolute;
@@ -64,104 +93,22 @@ h1 {
   transform: scaleX(-1);
 }
 
+#camera { filter: grayscale(1) contrast(1.1) brightness(0.8); }
+
+/* The ring: black, with a faint grid. */
 #ring {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  background: #1b1d24;
   display: none;
+  background:
+    linear-gradient(var(--panel-2) 1px, transparent 1px) 0 0 / 100% 48px,
+    linear-gradient(90deg, var(--panel-2) 1px, transparent 1px) 0 0 / 48px 100%,
+    radial-gradient(ellipse at 50% 35%, #15161a 0%, #050506 75%);
 }
 
 #stage.sparring #ring { display: block; }
-
-#score {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: clamp(16px, 3vw, 30px);
-  font-weight: 700;
-  text-shadow: 0 0 8px #000;
-  pointer-events: none;
-}
-
-#score[hidden] { display: none; }
-
-#callouts,
-#level-label { color: #b7b9c0; }
-
-select {
-  margin-left: 6px;
-  padding: 11px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: #3a3d46;
-  color: #fff;
-  font-size: 16px;
-}
-
-#tools {
-  margin-top: 12px;
-  color: #8b8e97;
-}
-
-#tool-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 8px;
-}
-
-#tool-buttons button { background: #3a3d46; }
-
-/* The opponent's punch landing: the whole stage flashes red. */
-#stage.hit::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(229, 72, 77, 0.45);
-  pointer-events: none;
-}
-
-
-#controls {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 12px;
-}
-
-button {
-  padding: 12px 20px;
-  border: 0;
-  border-radius: 8px;
-  background: #e5484d;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-#readout {
-  color: #b7b9c0;
-  font-variant-numeric: tabular-nums;
-}
-
-#moves {
-  min-height: 28px;
-  margin: 12px 0 0;
-  font-size: 20px;
-  font-weight: 600;
-}
 
 #flash {
   position: absolute;
@@ -169,8 +116,10 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: clamp(48px, 14vw, 160px);
-  font-weight: 800;
+  font-family: var(--mono);
+  font-size: clamp(40px, 12vw, 140px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #fff;
   text-shadow: 0 0 24px #000, 0 0 8px #000;
@@ -181,17 +130,213 @@ button:disabled {
 
 #flash.on { opacity: 1; }
 
-#controls { flex-wrap: wrap; }
+/* The opponent's punch landing: the whole stage flashes red. */
+#stage.hit::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 45, 61, 0.4);
+  pointer-events: none;
+}
 
-#debug {
-  margin: 8px 0 0;
-  color: #8b8e97;
+#score {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: clamp(13px, 2.4vw, 22px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px #000;
+  pointer-events: none;
+}
+
+#score[hidden] { display: none; }
+
+#score .clock {
+  font-size: 1.5em;
+  color: #fff;
+}
+
+#score .clock.last { color: var(--red); }
+
+/* Results, shown over the stage when a round ends. */
+#results {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: rgba(5, 5, 6, 0.92);
+  text-align: center;
+}
+
+#results[hidden] { display: none; }
+
+#results h2 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(22px, 5vw, 40px);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+#results-detail {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
   font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#results-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  width: min(100%, 440px);
+  margin: 8px 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+#results-list div {
+  padding: 12px;
+  background: var(--panel);
+}
+
+#results-list dt {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+#results-list dd {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: clamp(22px, 5vw, 34px);
+  font-weight: 600;
+}
+
+#results-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+#controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: 12px;
+}
+
+button {
+  min-height: 44px;
+  padding: 10px 20px;
+  border: 1px solid var(--red);
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(255, 45, 61, 0.25), inset 0 0 12px rgba(255, 45, 61, 0.12);
+}
+
+button:hover { background: var(--red-dim); }
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button.quiet,
+#tool-buttons button {
+  border-color: var(--line-bright);
+  box-shadow: none;
+  color: var(--text);
+}
+
+button.quiet:hover,
+#tool-buttons button:hover { background: var(--panel-2); }
+
+.pick,
+#callouts {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+select {
+  min-height: 44px;
+  margin-left: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-bright);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+select:disabled { opacity: 0.4; }
+
+input[type="checkbox"] { accent-color: var(--red); }
+
+#readout {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
+#tools {
+  margin-top: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+#tool-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+#moves {
+  min-height: 24px;
+  margin: 12px 0 0;
+  font-family: var(--mono);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#debug,
 #version {
   margin: 8px 0 0;
-  color: #5d606a;
+  color: var(--dim);
+  font-family: var(--mono);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }

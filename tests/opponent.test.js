@@ -319,3 +319,79 @@ test("easy: a body punch is just another punch, and the guard has no gaps", () =
   opponent.playerMove("liver shot", 1500);
   assert.deepEqual(events, ["blocked", "open", "landed"]);
 });
+
+// --- Defense mode: it only attacks, and builds up over the round ---
+
+function defense(overrides = {}, randomValues = [ANY]) {
+  const events = [];
+  const opponent = createOpponent({
+    random: scripted(randomValues),
+    level: "easy",
+    onEvent: (e) =>
+      events.push(e.type + (e.target ? ":" + e.target : "") + (e.result ? ":" + e.result : "")),
+    config: {
+      guardMinMs: 1000, guardMaxMs: 1000, defenseGap: 0.5, windupMs: 1000, strikeMs: 300,
+      comboWindupMs: 350, defenseFollowUp: 0.6, defenseBodyChance: 0, maxHits: 5, ...overrides,
+    },
+  });
+  opponent.start(0, { mode: "defense", durationMs: 40000 });
+  return { opponent, events };
+}
+
+// Plays the round up to `until`, standing still so every punch lands.
+function standStill(opponent, until) {
+  for (let t = 0; t <= until; t += 50) opponent.update(t, { head: HEAD });
+}
+
+test("defense: it attacks on its own and your punches do nothing", () => {
+  const { opponent, events } = defense();
+  opponent.playerMove("cross", 100);
+  opponent.playerMove("chest shot", 200);
+  standStill(opponent, 1500);
+  assert.deepEqual(events, ["windup:head", "strike:head:hit"]);
+  assert.equal(opponent.score().landed, 0);
+  assert.equal(opponent.view(300).open, "full");
+});
+
+test("defense: you can still slip, duck and block", () => {
+  const { opponent, events } = defense();
+  opponent.update(500, { head: HEAD });
+  opponent.update(1500, { head: HEAD, blocking: true });
+  assert.equal(events.at(-1), "strike:head:blocked");
+  assert.equal(opponent.score().avoided, 1);
+});
+
+test("defense: it builds from singles to body shots to twos to threes", () => {
+  const { opponent } = defense({ maxHits: 999 });
+  assert.equal(opponent.view(0).stage, 0);
+  assert.equal(opponent.view(10000).stage, 1);
+  assert.equal(opponent.view(20000).stage, 2);
+  assert.equal(opponent.view(30000).stage, 3);
+  assert.equal(opponent.view(45000).stage, 3);
+});
+
+test("defense: no body shots in the first stage, some later", () => {
+  const { opponent, events } = defense({ defenseBodyChance: 1, maxHits: 999 });
+  standStill(opponent, 9000);
+  assert.ok(events.every((e) => !e.includes("body")));
+  standStill(opponent, 19000);
+  assert.ok(events.some((e) => e.startsWith("windup:body")));
+});
+
+test("defense: later stages throw combinations, each punch needing its own defence", () => {
+  const { opponent, events } = defense({ maxHits: 999 });
+  standStill(opponent, 19990);
+  const before = events.length;
+  // One attack in stage 2 is two punches with no return to guard between.
+  for (let t = 20000; t <= 24000; t += 50) opponent.update(t, { head: HEAD });
+  const later = events.slice(before).join(" ");
+  assert.match(later, /windup:head strike:head:hit windup:body strike:body:hit/);
+});
+
+test("defense: too many hits stops the round", () => {
+  const { opponent, events } = defense({ maxHits: 2 });
+  standStill(opponent, 10000);
+  assert.equal(events.at(-1), "stopped");
+  assert.equal(opponent.view(10000).state, "idle");
+  assert.equal(opponent.score().taken, 2);
+});

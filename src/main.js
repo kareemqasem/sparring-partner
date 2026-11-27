@@ -5,10 +5,10 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=16";
-import { createMoveDetector } from "./moves.js?v=16";
-import { createOpponent } from "./opponent.js?v=16";
-import { drawOpponent } from "./ring.js?v=16";
+import { createTracker, BONES } from "./pose.js?v=17";
+import { createMoveDetector } from "./moves.js?v=17";
+import { createOpponent } from "./opponent.js?v=17";
+import { drawOpponent } from "./ring.js?v=17";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -35,17 +35,48 @@ const calloutsEl = document.getElementById("callouts");
 const toolsEl = document.getElementById("tools");
 const levelEl = document.getElementById("level");
 const levelLabel = document.getElementById("level-label");
+const modeEl = document.getElementById("mode");
+const modeLabel = document.getElementById("mode-label");
+const lengthEl = document.getElementById("length");
+const lengthLabel = document.getElementById("length-label");
+const resultsEl = document.getElementById("results");
+const resultsTitle = document.getElementById("results-title");
+const resultsDetail = document.getElementById("results-detail");
+const resultsList = document.getElementById("results-list");
+const againBtn = document.getElementById("again");
+const closeResultsBtn = document.getElementById("close-results");
 
 const MIN_VISIBILITY = 0.5;
 const STANCE = "orthodox";
 
-// Says the move out loud. A new call-out cuts off the previous one so the
-// voice keeps up with fast combinations.
-function say(text) {
+// The voice. Browsers supply their own voices, and which ones exist differs
+// by device, so this looks for a female English one and falls back to
+// whatever English voice there is. A lowered rate and raised pitch make it
+// sound more synthetic.
+const FEMALE_VOICE = /female|zira|samantha|victoria|karen|moira|tessa|fiona|serena|susan|hazel|aria|jenny|sonia|libby/i;
+let chosenVoice = null;
+
+function chooseVoice() {
+  if (!("speechSynthesis" in window)) return;
+  const english = window.speechSynthesis.getVoices().filter((v) => /^en/i.test(v.lang));
+  chosenVoice = english.find((v) => FEMALE_VOICE.test(v.name)) || english[0] || null;
+}
+
+if ("speechSynthesis" in window) {
+  chooseVoice();
+  // Voices often arrive a moment after the page loads.
+  window.speechSynthesis.addEventListener("voiceschanged", chooseVoice);
+}
+
+// Says something out loud. A new line cuts off the previous one so the
+// voice keeps up with fast combinations. `calm` is for full sentences.
+function say(text, { calm = false } = {}) {
   if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
   const words = new SpeechSynthesisUtterance(text);
-  words.rate = 1.4;
+  if (chosenVoice) words.voice = chosenVoice;
+  words.rate = calm ? 0.92 : 1.35;
+  words.pitch = 1.15;
   if (synth.speaking || synth.pending) {
     // Some browsers drop a call-out made straight after a cancel.
     synth.cancel();
@@ -53,6 +84,14 @@ function say(text) {
   } else {
     synth.speak(words);
   }
+}
+
+// The welcome, spoken once, on the first button press (browsers do not
+// allow any sound before that).
+function greet() {
+  const hour = new Date().getHours();
+  const part = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  say("Good " + part + ", Consigliere. Welcome to the Code of War.", { calm: true });
 }
 
 // Shows the move in large letters over the video for a moment.
@@ -98,7 +137,7 @@ function draw(points) {
   const px = (p) => [p.x * canvas.width, p.y * canvas.height];
 
   ctx.lineWidth = 4;
-  ctx.strokeStyle = "#4dd0e1";
+  ctx.strokeStyle = "#ffffff";
   for (const [from, to] of BONES) {
     const a = points[from];
     const b = points[to];
@@ -113,7 +152,7 @@ function draw(points) {
     if (!isSeen(point)) continue;
     const isHand = name.endsWith("Wrist");
     const [x, y] = px(point);
-    ctx.fillStyle = isHand ? "#e5484d" : "#ffffff";
+    ctx.fillStyle = isHand ? "#ff2d3d" : "#ffffff";
     ctx.beginPath();
     ctx.arc(x, y, isHand ? 12 : 6, 0, Math.PI * 2);
     ctx.fill();
@@ -236,7 +275,9 @@ function tone(pitch, seconds = 0.15, shape = "sine", loudness = 0.4) {
 const beep = () => tone(880);
 
 function startRecording(drillName) {
-  if (sparring) setSparring(false);
+  if (round) endRound("quit");
+  resultsEl.hidden = true;
+  stageEl.classList.remove("sparring");
   const drill = DRILLS[drillName];
   const guided = Boolean(drill);
   const plan = guided
@@ -261,12 +302,12 @@ function startRecording(drillName) {
   for (const button of recordButtons) button.disabled = true;
 }
 
-const round = (v) => Math.round(v * 1000) / 1000;
+const round3 = (v) => Math.round(v * 1000) / 1000;
 function compact(points) {
   const out = {};
   for (const [name, p] of Object.entries(points)) {
     if (name.endsWith("Hip")) continue;
-    out[name] = [round(p.x), round(p.y), round(p.z), round(p.visibility ?? 1)];
+    out[name] = [round3(p.x), round3(p.y), round3(p.z), round3(p.visibility ?? 1)];
   }
   return out;
 }
@@ -393,49 +434,145 @@ const opponent = createOpponent({
         tone(700, 0.1);
       }
     } else if (event.type === "landed") {
-      flash(event.where && event.where !== "head" && levelEl.value === "hard" ? event.where + "!" : "landed!");
+      flash(event.where && event.where !== "head" && round && round.level === "hard" ? event.where + "!" : "landed!");
       tone(1760, 0.2, "triangle", 0.5);
     } else if (event.type === "blocked") {
       tone(300, 0.08, "square", 0.2);
+    } else if (event.type === "stopped") {
+      endRound("stopped");
+      return;
     }
     showScore();
   },
 });
 
+// The round: its clock, bell and results.
+let round = null; // { mode, level, lengthMs, startedAt, endsAt, lastSecond }
+
+const clockText = (ms) => {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+};
+
+function bell(times) {
+  for (let i = 0; i < times; i++) setTimeout(() => tone(1175, 0.7, "triangle", 0.5), i * 350);
+}
+
 function showScore() {
+  if (!round) return;
   const s = opponent.score();
+  const left = round.endsAt - performance.now();
+  const parts =
+    round.mode === "defense"
+      ? ["Avoided " + s.avoided, clockText(left), "Hits " + s.taken + " of " + MAX_HITS]
+      : ["Landed " + s.landed + "  Avoided " + s.avoided, clockText(left), "Hits taken " + s.taken];
   scoreEl.innerHTML = "";
-  for (const text of ["Landed " + s.landed, "Avoided " + s.avoided, "Hits taken " + s.taken]) {
+  parts.forEach((text, i) => {
     const part = document.createElement("span");
     part.textContent = text;
+    if (i === 1) part.className = left <= 10000 ? "clock last" : "clock";
     scoreEl.append(part);
-  }
+  });
 }
 
-function setSparring(on) {
-  sparring = on;
-  levelEl.disabled = on;
-  if (on) opponent.setLevel(levelEl.value);
-  stageEl.classList.toggle("sparring", on);
-  scoreEl.hidden = !on;
-  sparBtn.textContent = on ? "Stop sparring" : "Start sparring";
-  toolsEl.hidden = on;
-  if (on) {
-    unlockSound();
-    // While sparring the sounds do the talking, unless you ask for call-outs.
-    voiceBox.checked = false;
-    opponent.start(performance.now());
+const MAX_HITS = 5; // matches the opponent's maxHits for defense mode
+
+function startRound() {
+  unlockSound();
+  const now = performance.now();
+  const lengthMs = Number(lengthEl.value) * 60000;
+  round = {
+    mode: modeEl.value,
+    level: levelEl.value,
+    lengthMs,
+    startedAt: now,
+    endsAt: now + lengthMs,
+    lastSecond: null,
+  };
+  sparring = true;
+  resultsEl.hidden = true;
+  for (const el of [levelEl, modeEl, lengthEl]) el.disabled = true;
+  stageEl.classList.add("sparring");
+  scoreEl.hidden = false;
+  sparBtn.textContent = "Stop round";
+  toolsEl.hidden = true;
+  // During a round the sounds do the talking, unless you ask for call-outs.
+  voiceBox.checked = false;
+  opponent.setLevel(round.level);
+  opponent.start(now, { mode: round.mode, durationMs: lengthMs });
+  bell(1);
+  flash(round.mode === "defense" ? "defend" : "fight");
+  showScore();
+}
+
+// why: "time" (the clock ran out), "stopped" (too many hits), "quit" (you stopped it)
+function endRound(why) {
+  if (!round) return;
+  const finished = round;
+  const lasted = Math.min(performance.now(), finished.endsAt) - finished.startedAt;
+  const s = opponent.score();
+  opponent.stop();
+  round = null;
+  sparring = false;
+  for (const el of [levelEl, modeEl, lengthEl]) el.disabled = false;
+  stageEl.classList.remove("hit");
+  scoreEl.hidden = true;
+  sparBtn.textContent = "Start round";
+  toolsEl.hidden = false;
+
+  if (why === "quit") {
+    stageEl.classList.remove("sparring");
+    return;
+  }
+
+  bell(3);
+  const faced = s.avoided + s.taken;
+  const rows =
+    finished.mode === "defense"
+      ? [["Avoided", s.avoided], ["Hits taken", s.taken], ["Defence", faced ? Math.round((100 * s.avoided) / faced) + "%" : "-"], ["Lasted", clockText(lasted)]]
+      : [["Landed", s.landed], ["Hits taken", s.taken], ["Avoided", s.avoided], ["Defence", faced ? Math.round((100 * s.avoided) / faced) + "%" : "-"]];
+  resultsTitle.textContent = why === "stopped" ? "Round stopped" : "Round over";
+  resultsDetail.textContent =
+    (finished.mode === "defense" ? "Defense" : "Sparring") + " / " + finished.level + " / " +
+    clockText(finished.lengthMs) + (why === "stopped" ? " / too many hits" : "");
+  resultsList.innerHTML = "";
+  for (const [label, value] of rows) {
+    const row = document.createElement("div");
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = label;
+    dd.textContent = value;
+    row.append(dt, dd);
+    resultsList.append(row);
+  }
+  resultsEl.hidden = false;
+}
+
+// Keeps the clock moving and rings the bell when time is up.
+function tickRound(now) {
+  if (!round) return;
+  const left = round.endsAt - now;
+  if (left <= 0) {
+    endRound("time");
+    return;
+  }
+  const second = Math.ceil(left / 1000);
+  if (second !== round.lastSecond) {
+    round.lastSecond = second;
+    if (second === 10) tone(880, 0.25, "square", 0.3); // ten seconds left
     showScore();
-  } else {
-    opponent.stop();
-    stageEl.classList.remove("hit");
   }
 }
 
-sparBtn.addEventListener("click", () => setSparring(!sparring));
+sparBtn.addEventListener("click", () => (round ? endRound("quit") : startRound()));
+againBtn.addEventListener("click", startRound);
+closeResultsBtn.addEventListener("click", () => {
+  resultsEl.hidden = true;
+  stageEl.classList.remove("sparring");
+});
 
 function drawRing(now) {
-  if (!sparring) return;
+  if (!stageEl.classList.contains("sparring")) return;
   const box = ringCanvas.getBoundingClientRect();
   const scale = window.devicePixelRatio || 1;
   const width = Math.round(box.width * scale);
@@ -474,6 +611,7 @@ function run(tracker) {
     // The opponent keeps moving every screen refresh, even between camera frames.
     const tick = performance.now();
     opponent.update(tick, { blocking: detector.isBlocking(), head: detector.head() });
+    tickRound(tick);
     drawRing(tick);
 
     if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
@@ -507,6 +645,8 @@ function run(tracker) {
 
 startBtn.addEventListener("click", async () => {
   startBtn.disabled = true;
+  unlockSound();
+  greet();
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     setStatus("This browser can't open the camera. The page must be opened over https.", true);
@@ -528,10 +668,9 @@ startBtn.addEventListener("click", async () => {
     const tracker = await createTracker();
     startBtn.hidden = true;
     sparBtn.hidden = false;
-    levelLabel.hidden = false;
+    for (const el of [modeLabel, levelLabel, lengthLabel]) el.hidden = false;
     calloutsEl.hidden = false;
     toolsEl.hidden = false;
-    say("Ready");
     flash("ready");
     run(tracker);
   } catch (err) {

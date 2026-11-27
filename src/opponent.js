@@ -45,6 +45,12 @@ const BASE = {
   comboChance: 0,      // how often a counter is followed by a second punch
   comboWindupMs: 350,  // warning time for that second punch
 
+  // Defense mode.
+  defenseGap: 0.6,     // gaps between its attacks, as a share of the usual guard time
+  defenseFollowUp: 0.6,// warning for the later punches of a combination, as a share of the first
+  defenseBodyChance: 0.4,
+  maxHits: 5,          // hits that end a defense round early
+
   // Head movement, in body widths, that takes you off the line of a head shot.
   dodgeSideways: 0.28,
   dodgeDown: 0.3,
@@ -104,6 +110,9 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
   let wary = null;           // the target it has learned to protect
   let streak = { where: null, count: 0 };
   let comboLeft = 0;         // punches still to come in the current counter
+  let mode = "spar";         // "spar" or "defense"
+  let startedAt = 0;
+  let durationMs = Infinity; // length of the round, for pacing defense mode
   let coveredAt = -Infinity; // when it last blocked one of your punches
   let coveredWhere = "head";
   let hurtWhere = null;      // the target it was last hit on
@@ -146,7 +155,19 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
     onEvent({ type: "shift", open });
   }
 
+  // Defense mode's four stages: 0 singles to the head, 1 body shots mixed
+  // in, 2 two-punch combinations, 3 three-punch combinations.
+  function stage(time) {
+    if (!Number.isFinite(durationMs) || durationMs <= 0) return 0;
+    return Math.min(3, Math.max(0, Math.floor((4 * (time - startedAt)) / durationMs)));
+  }
+
   function toGuard(time, avoid) {
+    if (mode === "defense") {
+      go("guard", time, between(C.guardMinMs, C.guardMaxMs) * C.defenseGap);
+      shiftAt = Infinity;
+      return;
+    }
     go("guard", time, between(C.guardMinMs, C.guardMaxMs));
     if (C.postures) {
       changeGuard(time, avoid);
@@ -167,7 +188,12 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
   }
 
   function next(time) {
-    if (state === "guard") {
+    if (state === "guard" && mode === "defense") {
+      const now = stage(time);
+      comboLeft = [0, 0, 1, 2][now];
+      const toBody = now >= 1 && random() < C.defenseBodyChance;
+      startAttack(time, C.windupMs, toBody ? "body" : "head", false);
+    } else if (state === "guard") {
       if (random() < C.attackChance) {
         comboLeft = 0;
         startAttack(time, C.windupMs, random() < C.bodyAttackChance ? "body" : "head", false);
@@ -183,11 +209,21 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
       else score.avoided += 1;
       go("strike", time, C.strikeMs);
       onEvent({ type: "strike", hand, target, result });
+      if (mode === "defense" && score.taken >= C.maxHits) {
+        // Too many hits: the round is stopped.
+        state = "idle";
+        until = Infinity;
+        onEvent({ type: "stopped" });
+      }
     } else if (state === "strike" && comboLeft > 0) {
-      // The second punch of a counter, to the other level.
+      // The next punch of a combination, to the other level.
       comboLeft -= 1;
-      startAttack(time, C.comboWindupMs, target === "body" ? "head" : "body", true);
-    } else if (state === "strike" && result !== "hit") {
+      const ms =
+        mode === "defense"
+          ? Math.max(C.comboWindupMs, C.windupMs * C.defenseFollowUp)
+          : C.comboWindupMs;
+      startAttack(time, ms, target === "body" ? "head" : "body", true);
+    } else if (state === "strike" && result !== "hit" && mode !== "defense") {
       go("recover", time, C.recoverMs);
       onEvent({ type: "recover" });
     } else {
@@ -203,7 +239,12 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
       C = { ...LEVELS[name], ...config };
     },
 
-    start(time) {
+    // options.mode: "spar" (default) or "defense".
+    // options.durationMs: the round length; defense mode paces itself by it.
+    start(time, options = {}) {
+      mode = options.mode === "defense" ? "defense" : "spar";
+      startedAt = time;
+      durationMs = options.durationMs ?? Infinity;
       score.landed = 0;
       score.avoided = 0;
       score.taken = 0;
@@ -256,7 +297,7 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
         return;
       }
       const where = PUNCH_TARGET[move];
-      if (!where) return;
+      if (!where || mode === "defense") return; // in defense mode you only defend
       const toBody = where !== "head";
 
       const exposed = state === "open" || state === "recover";
@@ -313,8 +354,9 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
         coverWhere: coveredWhere,
         // Which target is open: "head", "chest", "liver", "side", "closed",
         // or "full" on Easy where the guard has no gaps to find.
-        open: C.postures ? open : "full",
-        wasOpen: C.postures ? wasOpen : "full",
+        open: C.postures && mode !== "defense" ? open : "full",
+        wasOpen: C.postures && mode !== "defense" ? wasOpen : "full",
+        stage: mode === "defense" ? stage(time) : null,
         shift,
       };
     },

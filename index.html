@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sparring Partner</title>
-  <link rel="stylesheet" href="style.css?v=16">
+  <title>The Code of War</title>
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
   <main>
     <header>
-      <h1>Sparring Partner</h1>
+      <h1>The Code of War</h1>
       <p id="status">Press start, allow the camera, then step back until your upper body is in view.</p>
     </header>
 
@@ -21,17 +21,40 @@
       </div>
       <div id="flash"></div>
       <div id="score" hidden></div>
+
+      <div id="results" hidden>
+        <h2 id="results-title">Round over</h2>
+        <p id="results-detail"></p>
+        <dl id="results-list"></dl>
+        <div id="results-buttons">
+          <button id="again" type="button">Go again</button>
+          <button id="close-results" type="button" class="quiet">Close</button>
+        </div>
+      </div>
     </div>
 
     <div id="controls">
       <button id="start" type="button">Start camera</button>
-      <label id="level-label" hidden>Level
+      <label class="pick" id="mode-label" hidden>Mode
+        <select id="mode">
+          <option value="spar">Sparring</option>
+          <option value="defense">Defense</option>
+        </select>
+      </label>
+      <label class="pick" id="level-label" hidden>Level
         <select id="level">
           <option value="easy">Easy</option>
           <option value="hard">Hard</option>
         </select>
       </label>
-      <button id="spar" type="button" hidden>Start sparring</button>
+      <label class="pick" id="length-label" hidden>Round
+        <select id="length">
+          <option value="1">1 minute</option>
+          <option value="2">2 minutes</option>
+          <option value="3" selected>3 minutes</option>
+        </select>
+      </label>
+      <button id="spar" type="button" hidden>Start round</button>
       <label id="callouts" hidden><input id="voice" type="checkbox" checked> Call out my moves</label>
       <span id="readout"></span>
     </div>
@@ -48,9 +71,9 @@
 
     <p id="moves" aria-live="off"></p>
     <p id="debug"></p>
-    <p id="version">Version 16</p>
+    <p id="version">Version 17</p>
   </main>
 
-  <script type="module" src="src/main.js?v=16"></script>
+  <script type="module" src="src/main.js?v=17"></script>
 </body>
 </html>
