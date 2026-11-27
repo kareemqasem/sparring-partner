@@ -26,6 +26,10 @@ function glovePose(pose, side) {
       return { x: side * 0.34, y: 0.4, size: 0.85 };
     case "thrown":
       return { x: side * 0.03, y: 0.44, size: 3.2 };
+    case "cover": // gloves snap together in front of the face to block
+      return { x: side * 0.06, y: 0.33, size: 1.35 };
+    case "missed": // the punching arm left hanging out after a miss
+      return { x: side * 0.2, y: 0.52, size: 1.2 };
     default: // guard: gloves up by the chin
       return { x: side * 0.11, y: 0.36, size: 1 };
   }
@@ -47,6 +51,14 @@ function gloves(view) {
       // Drops quickly, stays down, comes back up at the end.
       const down = progress < 0.85 ? ease(Math.min(1, progress / 0.15)) : ease((1 - progress) / 0.15);
       pose = mixPose(guard, glovePose("open", side), down);
+    } else if (state === "recover") {
+      // Off balance after missing: one arm hanging out, the other low,
+      // both pulling back to guard at the end.
+      const exposed = glovePose(side === punching ? "missed" : "open", side);
+      const back = progress < 0.8 ? 0 : ease((progress - 0.8) / 0.2);
+      pose = mixPose(exposed, guard, back);
+    } else if (state === "guard" && view.cover > 0) {
+      pose = mixPose(guard, glovePose("cover", side), ease(view.cover));
     } else if (state === "hurt") {
       pose = mixPose(glovePose("open", side), guard, ease(progress));
     } else if (side === punching && state === "windup") {
@@ -80,7 +92,9 @@ export function drawOpponent(ctx, width, height, view, time) {
   ctx.strokeStyle = COLORS.outline;
 
   // Torso: wide shoulders tapering to the waist.
-  const isOpen = view.state === "open" && view.progress < 0.85;
+  const isOpen =
+    (view.state === "open" && view.progress < 0.85) ||
+    (view.state === "recover" && view.progress < 0.8);
   ctx.fillStyle = isOpen ? COLORS.bodyOpen : COLORS.body;
   ctx.beginPath();
   ctx.moveTo(X(-0.24), Y(0.44));
@@ -124,6 +138,7 @@ export function drawOpponent(ctx, width, height, view, time) {
   const poses = gloves(view);
   const punching = view.hand === "left" ? -1 : 1;
   const order = view.state === "windup" || view.state === "strike" ? [-punching, punching] : [-1, 1];
+  const covering = view.state === "guard" && view.cover > 0;
   for (const side of order) {
     const pose = poses[side];
     const radius = size * 0.062 * pose.size;
@@ -145,5 +160,16 @@ export function drawOpponent(ctx, width, height, view, time) {
     ctx.arc(X(pose.x), Y(pose.y), radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+  }
+
+  // A burst on its gloves when it blocks your punch.
+  if (covering) {
+    ctx.strokeStyle = COLORS.hurt;
+    ctx.lineWidth = Math.max(3, size * 0.012);
+    ctx.globalAlpha = view.cover;
+    ctx.beginPath();
+    ctx.arc(X(0), Y(0.33), size * (0.1 + 0.08 * (1 - view.cover)), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 }

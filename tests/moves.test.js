@@ -12,8 +12,8 @@ const GUARD = {
   rightShoulder: [-0.18, -0.5, 0],
   leftElbow: [0.2, -0.3, -0.1],
   rightElbow: [-0.2, -0.3, -0.1],
-  leftWrist: [0.12, -0.6, -0.2],
-  rightWrist: [-0.12, -0.6, -0.2],
+  leftWrist: [0.12, -0.56, -0.2],
+  rightWrist: [-0.12, -0.56, -0.2],
 };
 
 // Straight: the arm snaps straight, elbow lifted, fist well above the elbow.

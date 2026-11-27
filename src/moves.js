@@ -48,10 +48,11 @@ export const TUNING = {
   slipAfterPunchMs: 1300, // the head swings back after a punch; not a slip
   slipRecoverMs: 1200,    // coming back up from a slip is not another slip
 
-  // Block: both gloves up by the head and held.
-  blockHoldMs: 120,
-  blockHeight: 0.35,      // gloves no lower than this far below the nose
-  blockWidth: 0.7,        // gloves no further than this to the side of the nose
+  // Block: both gloves up by the head. In the normal guard the gloves sit
+  // about 0.8 below the nose; in a block they come up level with it.
+  blockHoldMs: 60,
+  blockHeight: 0.5,       // gloves no lower than this far below the nose
+  blockWidth: 0.9,        // gloves no further than this to the side of the nose
 
   minVisibility: 0.5,
 };
@@ -80,6 +81,7 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   let lastTime = null;
   let lastPunchAt = -Infinity;
 
+  let headNow = null;
   let headTrail = [];
   let slipPending = null;
   let slipQuietUntil = 0;
@@ -208,10 +210,12 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   function updateHead(image, time) {
     const { nose } = image;
     if (!seen(nose) || bodyScale < 0.01) {
+      headNow = null;
       headTrail = [];
       slipPending = null;
       return;
     }
+    headNow = { x: nose.x / bodyScale, y: nose.y / bodyScale };
 
     // Where the head has been over the last moment. A slip is judged by how
     // far the head has just travelled, not by where it is, because the
@@ -263,10 +267,9 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   function updateBlock(image, time) {
     const { nose, leftWrist, rightWrist } = image;
     const usable = [nose, leftWrist, rightWrist].every(seen) && bodyScale >= 0.01;
-    const punching = hands.left.strike || hands.right.strike;
 
     let glovesUp = false;
-    if (usable && !punching) {
+    if (usable) {
       const isUp = (wrist) =>
         wrist.y <= nose.y + T.blockHeight * bodyScale &&
         Math.abs(wrist.x - nose.x) <= T.blockWidth * bodyScale;
@@ -314,6 +317,9 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
       updateBlock(image, time);
     },
     isBlocking: () => blocking,
+    // Where the head is, in body widths, or null if it cannot be seen.
+    // x grows towards the boxer's left, y grows downward.
+    head: () => headNow,
     // Live numbers for tuning: how fast and how straight each arm is.
     debug: () => ({
       left: { speed: hands.left.speed, reach: hands.left.reach },

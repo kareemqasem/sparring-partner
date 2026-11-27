@@ -5,10 +5,10 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=10";
-import { createMoveDetector } from "./moves.js?v=10";
-import { createOpponent } from "./opponent.js?v=10";
-import { drawOpponent } from "./ring.js?v=10";
+import { createTracker, BONES } from "./pose.js?v=11";
+import { createMoveDetector } from "./moves.js?v=11";
+import { createOpponent } from "./opponent.js?v=11";
+import { drawOpponent } from "./ring.js?v=11";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -330,6 +330,9 @@ const opponent = createOpponent({
       tone(520, 0.18, "square", 0.25); // warning: a punch is coming
     } else if (event.type === "open") {
       tone(1320, 0.12);                // its guard is down: hit it
+    } else if (event.type === "recover") {
+      flash("counter!");               // it missed and is exposed
+      tone(1320, 0.12);
     } else if (event.type === "strike") {
       if (event.result === "hit") {
         flash("hit!");
@@ -338,7 +341,7 @@ const opponent = createOpponent({
         clearTimeout(hitTimer);
         hitTimer = setTimeout(() => stageEl.classList.remove("hit"), 250);
       } else {
-        flash(event.result);
+        flash(event.result === "slipped" ? "slipped!" : "blocked!");
         tone(700, 0.1);
       }
     } else if (event.type === "landed") {
@@ -418,7 +421,7 @@ function run(tracker) {
   function loop() {
     // The opponent keeps moving every screen refresh, even between camera frames.
     const tick = performance.now();
-    opponent.update(tick, { blocking: detector.isBlocking() });
+    opponent.update(tick, { blocking: detector.isBlocking(), head: detector.head() });
     drawRing(tick);
 
     if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
