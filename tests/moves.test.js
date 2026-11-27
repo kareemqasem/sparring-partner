@@ -25,6 +25,9 @@ const RIGHT_HOOK = { rightElbow: [-0.2, -0.54, -0.25], rightWrist: [0.15, -0.55,
 // Body punch: the elbow stays down and the fist drives in below the shoulder.
 const BODY_CROSS = { rightElbow: [-0.2, -0.3, -0.15], rightWrist: [-0.1, -0.25, -0.5] };
 const BODY_JAB = { leftElbow: [0.2, -0.3, -0.15], leftWrist: [0.1, -0.25, -0.5] };
+// Body hook: the same low fist, but swung out wide of the body.
+const BODY_LEFT_HOOK = { leftElbow: [0.3, -0.3, -0.1], leftWrist: [0.36, -0.25, -0.35] };
+const BODY_RIGHT_HOOK = { rightElbow: [-0.3, -0.3, -0.1], rightWrist: [-0.44, -0.25, -0.35] };
 // Slip: the head goes sideways and dips, hands stay home.
 const SLIP_LEFT = { nose: [0.22, -0.69, -0.05] };
 const SLIP_RIGHT = { nose: [-0.22, -0.69, -0.05] };
@@ -98,12 +101,16 @@ test("jab, cross, hook combination", () => {
   );
 });
 
-test("a punch to the body is a body shot, from either hand", () => {
-  assert.deepEqual(run([[BODY_CROSS, 150, 200], [REST, 300, 300], [BODY_JAB, 150, 200]]), ["body shot", "body shot"]);
+test("a straight to the body is a chest shot, from either hand", () => {
+  assert.deepEqual(run([[BODY_CROSS, 150, 200], [REST, 300, 300], [BODY_JAB, 150, 200]]), ["chest shot", "chest shot"]);
+});
+
+test("a body hook swung wide on the left goes to the liver, on the right to the side", () => {
+  assert.deepEqual(run([[BODY_LEFT_HOOK, 150, 200], [REST, 300, 300], [BODY_RIGHT_HOOK, 150, 200]]), ["liver shot", "side shot"]);
 });
 
 test("both arms swinging in one body punch count once", () => {
-  assert.deepEqual(run([[{ ...BODY_CROSS, ...BODY_JAB }, 150, 200]]), ["body shot"]);
+  assert.deepEqual(run([[{ ...BODY_CROSS, ...BODY_JAB }, 150, 200]]), ["chest shot"]);
 });
 
 test("slips to each side", () => {

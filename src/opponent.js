@@ -14,9 +14,11 @@
 // head has moved off that line or your gloves are up as it arrives. A body
 // shot can only be ducked.
 //
-// On Hard its guard is either high (head covered, body open) or low (body
-// covered, head open) and keeps shifting. Punch where the guard is not.
-// When it blocks you it may fire straight back.
+// On Hard it leaves only one target open at a time - head, chest, liver or
+// the other side - and keeps changing which. Punch the open one. It also
+// learns: land twice on the same target and it starts keeping that one
+// covered and countering when you go back to it. When it blocks you it may
+// fire straight back, sometimes with two punches.
 
 const BASE = {
   guardMinMs: 1400,    // shortest time it stays covered up between actions
@@ -31,11 +33,17 @@ const BASE = {
   coverShowMs: 280,    // how long its block is shown
 
   bodyAttackChance: 0, // how often its attack goes to your body
-  guardLevels: false,  // does it hold a high or low guard that you punch around
-  shiftMinMs: 1200,    // how often its guard shifts between high and low
-  shiftMaxMs: 2400,
+  postures: false,     // does it leave one target open that you must find
+  shiftMinMs: 600,     // how long one target stays open before the guard changes
+  shiftMaxMs: 1000,
+  closedChance: 0.2,   // how often the change is to a fully closed guard
+  openGraceMs: 250,    // a punch read this soon after its target closed still lands
+  wiseAfter: 2,        // hits in a row on one target before it starts protecting it
+  wiseWeight: 0.25,    // how much less often it then leaves that target open
   counterChance: 0,    // how often it fires back after blocking you
-  counterWindupMs: 400,// warning time for that counter
+  counterWindupMs: 300,// warning time for that counter
+  comboChance: 0,      // how often a counter is followed by a second punch
+  comboWindupMs: 350,  // warning time for that second punch
 
   // Head movement, in body widths, that takes you off the line of a head shot.
   dodgeSideways: 0.28,
@@ -59,15 +67,26 @@ export const LEVELS = {
     recoverMs: 800,
     coverUpMs: 600,
     bodyAttackChance: 0.4,
-    guardLevels: true,
+    postures: true,
     counterChance: 0.5,
+    comboChance: 0.5,
   },
 };
 
 export const OPPONENT = LEVELS.easy;
 
-const HEAD_PUNCHES = ["jab", "cross", "left hook", "right hook"];
-const BODY_PUNCH = "body shot";
+// Where each of the boxer's punches lands. "liver" is the opponent's right
+// side, which is on your left as you face it; "side" is its other flank.
+const PUNCH_TARGET = {
+  jab: "head",
+  cross: "head",
+  "left hook": "head",
+  "right hook": "head",
+  "chest shot": "chest",
+  "liver shot": "liver",
+  "side shot": "side",
+};
+const TARGETS = ["head", "chest", "liver", "side"];
 
 export function createOpponent({ random = Math.random, onEvent = () => {}, level = "easy", config = {} } = {}) {
   let C = { ...LEVELS[level], ...config };
@@ -78,11 +97,16 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
   let hand = "left";         // which of its hands is punching
   let target = "head";       // where its punch is going: "head" or "body"
   let result = null;         // how its last punch ended: "hit", "slipped", "blocked" or "ducked"
-  let guardLevel = "high";   // on Hard: "high" or "low"
-  let shiftAt = Infinity;    // when the guard next shifts
-  let shiftedAt = -Infinity; // when it last shifted
+  let open = "closed";       // on Hard: the one target left open, or "closed"
+  let wasOpen = "closed";    // what was open before the last change
+  let shiftAt = Infinity;    // when the guard next changes
+  let shiftedAt = -Infinity; // when it last changed
+  let wary = null;           // the target it has learned to protect
+  let streak = { where: null, count: 0 };
+  let comboLeft = 0;         // punches still to come in the current counter
   let coveredAt = -Infinity; // when it last blocked one of your punches
   let coveredWhere = "head";
+  let hurtWhere = null;      // the target it was last hit on
 
   let head = null;           // the boxer's head now
   let aimedAt = null;        // the boxer's head when the wind-up began
@@ -100,9 +124,36 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
     until = time + ms;
   }
 
-  function toGuard(time) {
+  // Picks what to leave open next: never the same as now, never `avoid`,
+  // and rarely the target it has grown wary of.
+  function pickOpen(avoid) {
+    const options = [...TARGETS, "closed"].filter((t) => t !== open && t !== avoid);
+    const weight = (t) =>
+      t === "closed" ? C.closedChance * TARGETS.length : t === wary ? C.wiseWeight : 1;
+    let roll = random() * options.reduce((sum, t) => sum + weight(t), 0);
+    for (const t of options) {
+      roll -= weight(t);
+      if (roll < 0) return t;
+    }
+    return options[options.length - 1];
+  }
+
+  function changeGuard(time, avoid) {
+    wasOpen = open;
+    open = pickOpen(avoid);
+    shiftedAt = time;
+    shiftAt = time + between(C.shiftMinMs, C.shiftMaxMs);
+    onEvent({ type: "shift", open });
+  }
+
+  function toGuard(time, avoid) {
     go("guard", time, between(C.guardMinMs, C.guardMaxMs));
-    shiftAt = C.guardLevels ? time + between(C.shiftMinMs, C.shiftMaxMs) : Infinity;
+    if (C.postures) {
+      changeGuard(time, avoid);
+      wasOpen = "closed"; // nothing "just closed" when it has only just covered up
+    } else {
+      shiftAt = Infinity;
+    }
   }
 
   function startAttack(time, ms, where, counter) {
@@ -118,6 +169,7 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
   function next(time) {
     if (state === "guard") {
       if (random() < C.attackChance) {
+        comboLeft = 0;
         startAttack(time, C.windupMs, random() < C.bodyAttackChance ? "body" : "head", false);
       } else {
         go("open", time, C.openMs);
@@ -131,11 +183,17 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
       else score.avoided += 1;
       go("strike", time, C.strikeMs);
       onEvent({ type: "strike", hand, target, result });
+    } else if (state === "strike" && comboLeft > 0) {
+      // The second punch of a counter, to the other level.
+      comboLeft -= 1;
+      startAttack(time, C.comboWindupMs, target === "body" ? "head" : "body", true);
     } else if (state === "strike" && result !== "hit") {
       go("recover", time, C.recoverMs);
       onEvent({ type: "recover" });
     } else {
-      toGuard(time);
+      // Coming back from being hit, it does not leave the same target open.
+      const avoid = state === "hurt" ? hurtWhere : null;
+      toGuard(time, avoid);
       onEvent({ type: "guard" });
     }
   }
@@ -151,7 +209,11 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
       score.taken = 0;
       coveredAt = -Infinity;
       shiftedAt = -Infinity;
-      guardLevel = "high";
+      open = "closed";
+      wasOpen = "closed";
+      wary = null;
+      streak = { where: null, count: 0 };
+      comboLeft = 0;
       toGuard(time);
     },
 
@@ -174,12 +236,9 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
       }
 
       while (state !== "idle") {
-        // The guard shifts between high and low while it waits.
+        // While it waits, the guard keeps changing which target is open.
         if (state === "guard" && shiftAt <= time && shiftAt < until) {
-          guardLevel = guardLevel === "high" ? "low" : "high";
-          shiftedAt = shiftAt;
-          shiftAt += between(C.shiftMinMs, C.shiftMaxMs);
-          onEvent({ type: "shift", guardLevel });
+          changeGuard(shiftAt);
         } else if (time >= until) {
           next(until);
         } else {
@@ -196,28 +255,37 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
         if (state === "windup") dodgedAt = time;
         return;
       }
-      const toBody = move === BODY_PUNCH;
-      if (!toBody && !HEAD_PUNCHES.includes(move)) return;
-      const where = toBody ? "body" : "head";
+      const where = PUNCH_TARGET[move];
+      if (!where) return;
+      const toBody = where !== "head";
 
       const exposed = state === "open" || state === "recover";
-      // With a high guard the body is open; with a low guard the head is.
-      const aroundGuard =
-        state === "guard" && C.guardLevels && (guardLevel === "high" ? toBody : !toBody);
+      // The open target can be hit. Reading a punch takes a moment, so one
+      // thrown at a target that has only just closed still counts.
+      const justClosed = wasOpen === where && time - shiftedAt <= C.openGraceMs;
+      const aroundGuard = state === "guard" && C.postures && (open === where || justClosed);
 
       if (exposed || aroundGuard) {
         score.landed += 1;
         const counter = state === "recover";
+        // Hit the same place often enough and it learns to protect it.
+        streak = streak.where === where ? { where, count: streak.count + 1 } : { where, count: 1 };
+        if (C.postures && streak.count >= C.wiseAfter) wary = where;
         go("hurt", time, C.hurtMs);
+        hurtWhere = where;
         onEvent({ type: "landed", move, where, counter });
       } else if (state === "guard") {
         coveredAt = time;
-        coveredWhere = where;
+        coveredWhere = toBody ? "body" : "head";
         onEvent({ type: "blocked", move, where });
-        if (C.counterChance > 0 && random() < C.counterChance) {
+        // It always punishes you for going back to the target it is wary of.
+        const fireBack =
+          C.counterChance > 0 && (where === wary || random() < C.counterChance);
+        if (fireBack) {
           // It blocks and fires straight back. A blocked body punch is
           // answered upstairs, with a hook to the head.
           const reply = toBody || random() < 0.5 ? "head" : "body";
+          comboLeft = random() < C.comboChance ? 1 : 0;
           startAttack(time, C.counterWindupMs, reply, true);
         } else {
           // It covers up, and does not launch an attack straight into your punch.
@@ -233,8 +301,8 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
         span > 0 && Number.isFinite(span) ? Math.min(1, Math.max(0, (time - since) / span)) : 0;
       // 1 at the moment it blocks your punch, fading to 0.
       const cover = state === "guard" ? Math.max(0, 1 - (time - coveredAt) / C.coverShowMs) : 0;
-      // 0 as the guard starts to shift, 1 once it has arrived.
-      const shift = Math.min(1, Math.max(0, (time - shiftedAt) / 220));
+      // 0 as the guard starts to change, 1 once it has arrived.
+      const shift = Math.min(1, Math.max(0, (time - shiftedAt) / 180));
       return {
         state,
         progress,
@@ -243,7 +311,10 @@ export function createOpponent({ random = Math.random, onEvent = () => {}, level
         result,
         cover,
         coverWhere: coveredWhere,
-        guardLevel: C.guardLevels ? guardLevel : "full",
+        // Which target is open: "head", "chest", "liver", "side", "closed",
+        // or "full" on Easy where the guard has no gaps to find.
+        open: C.postures ? open : "full",
+        wasOpen: C.postures ? wasOpen : "full",
         shift,
       };
     },

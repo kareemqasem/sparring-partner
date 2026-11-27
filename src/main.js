@@ -5,10 +5,10 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=15";
-import { createMoveDetector } from "./moves.js?v=15";
-import { createOpponent } from "./opponent.js?v=15";
-import { drawOpponent } from "./ring.js?v=15";
+import { createTracker, BONES } from "./pose.js?v=16";
+import { createMoveDetector } from "./moves.js?v=16";
+import { createOpponent } from "./opponent.js?v=16";
+import { drawOpponent } from "./ring.js?v=16";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -393,7 +393,7 @@ const opponent = createOpponent({
         tone(700, 0.1);
       }
     } else if (event.type === "landed") {
-      flash("landed!");
+      flash(event.where && event.where !== "head" && levelEl.value === "hard" ? event.where + "!" : "landed!");
       tone(1760, 0.2, "triangle", 0.5);
     } else if (event.type === "blocked") {
       tone(300, 0.08, "square", 0.2);

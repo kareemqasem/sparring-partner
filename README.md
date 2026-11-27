@@ -12,9 +12,9 @@ Version 1 goal: one working 3-minute round that scores hits and misses.
 
 - [x] Step 0: project setup
 - [x] Step 1: camera and body tracking (skeleton drawn over the video)
-- [x] Step 2: recognise moves (jab, cross, hook, slip, block), spoken out loud. Tuned on one labelled recording of one boxer; needs checking on fresh recordings. Punches to the body are recognised as a body shot, without saying which hand or which punch.
+- [x] Step 2: recognise moves (jab, cross, hook, slip, block), spoken out loud. Tuned on one labelled recording of one boxer; needs checking on fresh recordings. Punches to the body are recognised by zone: chest, liver or the other side.
 - [x] Step 3: on-screen opponent (simple boxer figure; blocks your punches, winds up before punching, and is open to a counter when you make it miss)
-- [x] Easy and Hard levels. Hard has a half-second warning, body shots you must duck, a high or low guard to punch around, and counters after it blocks you
+- [x] Easy and Hard levels. Hard has a half-second warning, body shots you must duck, one open target at a time (head, chest, liver or side) that keeps changing, a guard that learns what you keep hitting, and fast counters that can be two punches
 - [ ] Step 4: scoring (basic counts are in: landed, avoided, hits taken)
 - [ ] Step 5: 3-minute round with timer and summary
 - [ ] Step 6: test and tune at home

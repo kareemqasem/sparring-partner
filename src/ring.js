@@ -1,12 +1,22 @@
-// Draws the opponent: a simple boxer figure facing you. It only draws what
-// opponent.js says is happening; it makes no decisions of its own.
+// Draws the opponent as you would see it sparring: up close, filling the
+// screen, its head near your eye level. It only draws what opponent.js
+// says is happening; it makes no decisions of its own.
+//
+// Everything is placed in "figure units": fractions of the figure's height,
+// sideways from its centre line and down from the top of its head. The
+// figure's right side (its liver side) is on the left of the screen.
 
 const COLORS = {
-  body: "#3b4252",
-  bodyOpen: "#2e7d5b",   // chest lights up green when the guard is down
-  head: "#e0b089",
+  shirt: "#3b4252",
+  shirtShade: "#2c323f",
+  shirtOpen: "#2e7d5b",   // chest lights up green when the whole guard is down
+  skin: "#e0b089",
+  skinShade: "#b98a64",
+  skinLight: "#f1cba8",
   glove: "#c62828",
-  gloveWarn: "#ff9800",  // the loading glove turns orange as a warning
+  gloveLight: "#ef5350",
+  gloveWarn: "#ff9800",   // the loading glove turns orange as a warning
+  gloveWarnLight: "#ffc166",
   hurt: "#ffffff",
   outline: "#0b0c0f",
   target: "#7dffb8",
@@ -14,82 +24,119 @@ const COLORS = {
 
 const lerp = (a, b, k) => a + (b - a) * k;
 const ease = (k) => k * k * (3 - 2 * k);
+const mix = (from, to, k) => ({
+  x: lerp(from.x, to.x, k),
+  y: lerp(from.y, to.y, k),
+  size: lerp(from.size ?? 1, to.size ?? 1, k),
+});
 
-// Where a glove sits for each pose, as fractions of the figure's height,
-// measured from the figure's centre line. `side` is -1 for the glove on the
-// left of the screen and +1 for the one on the right.
+const SHOULDER = (side) => ({ x: side * 0.2, y: 0.45 });
+
+// Where the open target's ring is drawn.
+const TARGETS = {
+  head: { x: 0, y: 0.27, r: 0.125 },
+  chest: { x: 0, y: 0.58, r: 0.07 },
+  liver: { x: -0.13, y: 0.69, r: 0.055 },
+  side: { x: 0.13, y: 0.69, r: 0.055 },
+};
+
+// Named glove positions. `side` is -1 for the arm on the left of the screen
+// and +1 for the one on the right.
 function glovePose(pose, side) {
   switch (pose) {
-    case "open":
-      return { x: side * 0.27, y: 0.62, size: 1 };
-    case "loaded":
-      return { x: side * 0.34, y: 0.4, size: 0.85 };
-    case "thrown":
-      return { x: side * 0.03, y: 0.44, size: 3.2 };
-    case "low": // low guard: gloves down in front of the body, head exposed
-      return { x: side * 0.1, y: 0.6, size: 1 };
+    case "low": // gloves down in front of the chest, head exposed
+      return { x: side * 0.09, y: 0.58, size: 1 };
+    case "dropped": // whole guard down
+      return { x: side * 0.27, y: 0.64, size: 1 };
+    case "missed": // the punching arm left hanging out after a miss
+      return { x: side * 0.2, y: 0.54, size: 1.2 };
     case "cover": // gloves snap together in front of the face to block
       return { x: side * 0.06, y: 0.33, size: 1.35 };
     case "coverBody": // or together in front of the body
       return { x: side * 0.06, y: 0.6, size: 1.35 };
+    case "loaded": // pulled back to throw at your head
+      return { x: side * 0.34, y: 0.4, size: 0.85 };
+    case "thrown": // arriving in your face
+      return { x: side * 0.03, y: 0.42, size: 3.2 };
     case "loadedBody": // pulled back low, to go to your body
-      return { x: side * 0.32, y: 0.7, size: 0.85 };
+      return { x: side * 0.33, y: 0.64, size: 0.85 };
     case "thrownBody": // arriving low on the screen
-      return { x: side * 0.03, y: 0.78, size: 3 };
-    case "missed": // the punching arm left hanging out after a miss
-      return { x: side * 0.2, y: 0.52, size: 1.2 };
-    default: // guard: gloves up by the chin
+      return { x: side * 0.03, y: 0.7, size: 3 };
+    default: // "high": gloves up by the chin
       return { x: side * 0.11, y: 0.36, size: 1 };
   }
 }
 
-function mixPose(from, to, k) {
-  return { x: lerp(from.x, to.x, k), y: lerp(from.y, to.y, k), size: lerp(from.size, to.size, k) };
+// How the guard sits for each open target: where the glove rests, and
+// whether the elbow is tucked over the ribs or lifted away from them.
+function restPose(open, side) {
+  const tucked = { x: side * 0.2, y: 0.66 };
+  const lifted = { x: side * 0.33, y: 0.55 };
+  if (open === "head") return { glove: glovePose("low", side), elbow: { x: side * 0.23, y: 0.62 } };
+  if (open === "chest") {
+    // Gloves a little wide of the chin, leaving the middle clear.
+    return { glove: { x: side * 0.15, y: 0.35, size: 1 }, elbow: tucked };
+  }
+  const flank = open === "liver" ? -1 : open === "side" ? 1 : 0;
+  return { glove: glovePose("high", side), elbow: side === flank ? lifted : tucked };
 }
 
-// Works out both glove positions for the opponent's current state.
-function gloves(view) {
+// A natural elbow for an arm that is punching or hanging: halfway to the
+// glove, pushed outward and down.
+function elbowFor(side, glove) {
+  const s = SHOULDER(side);
+  return { x: (s.x + glove.x) / 2 + side * 0.07, y: (s.y + glove.y) / 2 + 0.07 };
+}
+
+// Works out both arms for the opponent's current state.
+function arms(view) {
   const { state, progress, hand } = view;
   const punching = hand === "left" ? -1 : 1;
-  const out = {};
   const toBody = view.target === "body";
+  const out = {};
+
   for (const side of [-1, 1]) {
-    // Where the gloves rest: up by the chin, or down by the body on a low
-    // guard, sliding between the two as the guard shifts.
-    const high = glovePose("guard", side);
-    const low = glovePose("low", side);
-    const shift = ease(view.shift ?? 1);
-    const guard =
-      view.guardLevel === "low" ? mixPose(high, low, shift)
-      : view.guardLevel === "high" ? mixPose(low, high, shift)
-      : high;
-    let pose = guard;
+    // The resting guard, sliding from the last posture to the current one.
+    const from = restPose(view.wasOpen ?? view.open, side);
+    const to = restPose(view.open, side);
+    const k = ease(view.shift ?? 1);
+    const rest = { glove: mix(from.glove, to.glove, k), elbow: mix(from.elbow, to.elbow, k) };
+
+    let glove = rest.glove;
+    let elbow = rest.elbow;
+    const free = (pose) => {
+      glove = pose;
+      elbow = elbowFor(side, pose);
+    };
+
     if (state === "open") {
       // Drops quickly, stays down, comes back up at the end.
       const down = progress < 0.85 ? ease(Math.min(1, progress / 0.15)) : ease((1 - progress) / 0.15);
-      pose = mixPose(guard, glovePose("open", side), down);
+      free(mix(rest.glove, glovePose("dropped", side), down));
     } else if (state === "recover") {
       // Off balance after missing: one arm hanging out, the other low,
       // both pulling back to guard at the end.
-      const exposed = glovePose(side === punching ? "missed" : "open", side);
+      const exposed = glovePose(side === punching ? "missed" : "dropped", side);
       const back = progress < 0.8 ? 0 : ease((progress - 0.8) / 0.2);
-      pose = mixPose(exposed, guard, back);
+      free(mix(exposed, rest.glove, back));
+    } else if (state === "hurt") {
+      free(mix(glovePose("dropped", side), rest.glove, ease(progress)));
     } else if (state === "guard" && view.cover > 0) {
       const block = glovePose(view.coverWhere === "body" ? "coverBody" : "cover", side);
-      pose = mixPose(guard, block, ease(view.cover));
-    } else if (state === "hurt") {
-      pose = mixPose(glovePose("open", side), guard, ease(progress));
+      glove = mix(rest.glove, block, ease(view.cover));
     } else if (side === punching && state === "windup") {
       const loaded = glovePose(toBody ? "loadedBody" : "loaded", side);
-      pose = mixPose(guard, loaded, ease(Math.min(1, progress / 0.4)));
+      free(mix(rest.glove, loaded, ease(Math.min(1, progress / 0.4))));
     } else if (side === punching && state === "strike") {
       // Flies at you fast, then pulls back.
       const out01 = progress < 0.35 ? ease(progress / 0.35) : 1 - ease((progress - 0.35) / 0.65);
-      pose = toBody
-        ? mixPose(glovePose("loadedBody", side), glovePose("thrownBody", side), out01)
-        : mixPose(glovePose("loaded", side), glovePose("thrown", side), out01);
+      free(
+        toBody
+          ? mix(glovePose("loadedBody", side), glovePose("thrownBody", side), out01)
+          : mix(glovePose("loaded", side), glovePose("thrown", side), out01),
+      );
     }
-    out[side] = pose;
+    out[side] = { glove, elbow };
   }
   return out;
 }
@@ -98,118 +145,156 @@ export function drawOpponent(ctx, width, height, view, time) {
   ctx.clearRect(0, 0, width, height);
   if (view.state === "idle") return;
 
-  const size = Math.min(height, width * 1.1); // the figure's height on screen
+  // Up close: the figure is taller than the screen, so its waist runs off
+  // the bottom and its head sits about a third of the way down.
+  const size = Math.min(height * 1.45, width * 1.25);
   const cx = width / 2;
-  const top = (height - size) / 2;
-  const bob = Math.sin(time / 380) * size * 0.008;
+  const top = height * 0.3 - size * 0.27;
+  const bob = Math.sin(time / 380) * size * 0.006;
   const sway = Math.sin(time / 900) * size * 0.012;
   const hurt = view.state === "hurt" ? 1 - view.progress : 0;
 
   const X = (fx) => cx + sway + fx * size;
   const Y = (fy) => top + bob + fy * size;
+  const line = Math.max(2, size * 0.006);
+
+  const disc = (x, y, r, fill) => {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  const ring = (x, y, r, colour, thickness) => {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = thickness;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  };
 
   ctx.lineJoin = "round";
-  ctx.lineWidth = Math.max(2, size * 0.008);
-  ctx.strokeStyle = COLORS.outline;
+  ctx.lineCap = "round";
 
-  // Torso: wide shoulders tapering to the waist.
-  const isOpen =
+  const exposed =
     (view.state === "open" && view.progress < 0.85) ||
     (view.state === "recover" && view.progress < 0.8);
-  const chestLit =
-    isOpen || (view.state === "guard" && view.guardLevel === "high" && (view.shift ?? 1) >= 1 && view.cover === 0);
-  ctx.fillStyle = chestLit ? COLORS.bodyOpen : COLORS.body;
+
+  // Neck.
+  ctx.fillStyle = COLORS.skinShade;
+  ctx.fillRect(X(-0.045), Y(0.33), size * 0.09, size * 0.1);
+
+  // Torso: wide shoulders tapering to the waist, darker down the sides so
+  // it reads as rounded.
+  ctx.fillStyle = exposed ? COLORS.shirtOpen : COLORS.shirt;
+  ctx.strokeStyle = COLORS.outline;
+  ctx.lineWidth = line;
   ctx.beginPath();
-  ctx.moveTo(X(-0.24), Y(0.44));
-  ctx.quadraticCurveTo(X(0), Y(0.36), X(0.24), Y(0.44));
-  ctx.lineTo(X(0.17), Y(1.02));
-  ctx.lineTo(X(-0.17), Y(1.02));
+  ctx.moveTo(X(-0.25), Y(0.47));
+  ctx.quadraticCurveTo(X(-0.24), Y(0.4), X(-0.08), Y(0.39));
+  ctx.lineTo(X(0.08), Y(0.39));
+  ctx.quadraticCurveTo(X(0.24), Y(0.4), X(0.25), Y(0.47));
+  ctx.lineTo(X(0.18), Y(1.1));
+  ctx.lineTo(X(-0.18), Y(1.1));
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-
-  // A target ring on the chest while the body can be hit: the guard is
-  // down, or (on Hard) it is held high.
-  const settled = (view.shift ?? 1) >= 1 && view.cover === 0;
-  const bodyOpen = isOpen || (view.state === "guard" && view.guardLevel === "high" && settled);
-  const headOpen = view.state === "guard" && view.guardLevel === "low" && settled;
-  if (bodyOpen) {
-    const pulse = 1 + Math.sin(time / 90) * 0.08;
-    ctx.strokeStyle = COLORS.target;
-    ctx.lineWidth = Math.max(3, size * 0.012);
-    ctx.beginPath();
-    ctx.arc(X(0), Y(0.6), size * 0.07 * pulse, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = COLORS.outline;
-    ctx.lineWidth = Math.max(2, size * 0.008);
+  if (!exposed) {
+    ctx.fillStyle = COLORS.shirtShade;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(X(side * 0.25), Y(0.47));
+      ctx.lineTo(X(side * 0.18), Y(1.1));
+      ctx.lineTo(X(side * 0.12), Y(1.1));
+      ctx.quadraticCurveTo(X(side * 0.17), Y(0.75), X(side * 0.2), Y(0.47));
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   // Head, knocked back and flashing white when hit.
   const headX = X(hurt * 0.04);
   const headY = Y(0.27 - hurt * 0.03);
-  ctx.fillStyle = hurt > 0.5 ? COLORS.hurt : COLORS.head;
-  ctx.beginPath();
-  ctx.arc(headX, headY, size * 0.095, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
-  // A target ring round the head while the guard is low.
-  if (headOpen) {
-    const pulse = 1 + Math.sin(time / 90) * 0.06;
-    ctx.strokeStyle = COLORS.target;
-    ctx.lineWidth = Math.max(3, size * 0.012);
+  const headR = size * 0.095;
+  disc(headX, headY, headR, hurt > 0.5 ? COLORS.hurt : COLORS.skin);
+  if (hurt <= 0.5) {
+    // Shade under the jaw, light on the brow.
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(headX, headY, size * 0.125 * pulse, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = COLORS.outline;
-    ctx.lineWidth = Math.max(2, size * 0.008);
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
+    ctx.clip();
+    disc(headX, headY + headR * 1.25, headR, COLORS.skinShade);
+    disc(headX - headR * 0.3, headY - headR * 0.75, headR * 0.5, COLORS.skinLight);
+    ctx.restore();
   }
-
-  // Eyes, so it reads as facing you.
-  ctx.fillStyle = COLORS.outline;
+  ring(headX, headY, headR, COLORS.outline, line);
+  // Eyes and brow, so it reads as looking at you.
   for (const side of [-1, 1]) {
+    disc(headX + side * headR * 0.38, headY - headR * 0.08, headR * 0.1, COLORS.outline);
+    ctx.strokeStyle = COLORS.outline;
+    ctx.lineWidth = line * 1.5;
     ctx.beginPath();
-    ctx.arc(headX + side * size * 0.035, headY - size * 0.012, size * 0.01, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(headX + side * headR * 0.6, headY - headR * 0.34);
+    ctx.lineTo(headX + side * headR * 0.2, headY - headR * 0.26);
+    ctx.stroke();
   }
 
-  // Gloves, the punching one drawn last so it passes in front.
-  const poses = gloves(view);
+  // The open target: a pulsing ring where a punch will land.
+  const settled = (view.shift ?? 1) >= 1 && view.cover === 0;
+  const openTarget = view.state === "guard" && settled ? TARGETS[view.open] : exposed ? TARGETS.chest : null;
+  const drawTarget = () => {
+    if (!openTarget) return;
+    const pulse = 1 + Math.sin(time / 90) * 0.07;
+    const tx = view.open === "head" && !exposed ? headX : X(openTarget.x);
+    const ty = view.open === "head" && !exposed ? headY : Y(openTarget.y);
+    ring(tx, ty, size * openTarget.r * pulse, COLORS.target, Math.max(3, size * 0.01));
+  };
+
+  // Arms and gloves. The punching arm is drawn last so it passes in front.
+  const both = arms(view);
   const punching = view.hand === "left" ? -1 : 1;
-  const order = view.state === "windup" || view.state === "strike" ? [-punching, punching] : [-1, 1];
-  const covering = view.state === "guard" && view.cover > 0;
+  const attacking = view.state === "windup" || view.state === "strike";
+  const order = attacking ? [-punching, punching] : [-1, 1];
+  const limb = (a, b, w, colour) => {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(X(a.x), Y(a.y));
+    ctx.lineTo(X(b.x), Y(b.y));
+    ctx.stroke();
+  };
+
+  drawTarget();
+
   for (const side of order) {
-    const pose = poses[side];
-    const radius = size * 0.062 * pose.size;
+    const { glove, elbow } = both[side];
+    const shoulder = SHOULDER(side);
+    const thick = size * 0.07;
     const warning = side === punching && view.state === "windup";
+
+    // Upper arm (sleeve) and forearm, each outlined.
+    limb(shoulder, elbow, thick + line * 2, COLORS.outline);
+    limb(elbow, glove, thick * 0.9 + line * 2, COLORS.outline);
+    limb(shoulder, elbow, thick, COLORS.shirt);
+    limb(elbow, glove, thick * 0.9, COLORS.skin);
+
+    const gx = X(glove.x);
+    const gy = Y(glove.y);
+    const radius = size * 0.062 * glove.size;
 
     if (warning) {
       // A ring that closes in on the glove: when it touches, the punch lands.
-      ctx.strokeStyle = COLORS.gloveWarn;
-      ctx.lineWidth = Math.max(3, size * 0.012);
-      ctx.beginPath();
-      ctx.arc(X(pose.x), Y(pose.y), radius * (1 + 2.2 * (1 - view.progress)), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.strokeStyle = COLORS.outline;
-      ctx.lineWidth = Math.max(2, size * 0.008);
+      ring(gx, gy, radius * (1 + 2.2 * (1 - view.progress)), COLORS.gloveWarn, Math.max(3, size * 0.01));
     }
-
-    ctx.fillStyle = warning ? COLORS.gloveWarn : COLORS.glove;
-    ctx.beginPath();
-    ctx.arc(X(pose.x), Y(pose.y), radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    disc(gx, gy, radius, warning ? COLORS.gloveWarn : COLORS.glove);
+    disc(gx - radius * 0.3, gy - radius * 0.35, radius * 0.35, warning ? COLORS.gloveWarnLight : COLORS.gloveLight);
+    ring(gx, gy, radius, COLORS.outline, line);
   }
 
   // A burst on its gloves when it blocks your punch.
-  if (covering) {
-    ctx.strokeStyle = COLORS.hurt;
-    ctx.lineWidth = Math.max(3, size * 0.012);
+  if (view.state === "guard" && view.cover > 0) {
     ctx.globalAlpha = view.cover;
-    ctx.beginPath();
     const burstY = view.coverWhere === "body" ? 0.6 : 0.33;
-    ctx.arc(X(0), Y(burstY), size * (0.1 + 0.08 * (1 - view.cover)), 0, Math.PI * 2);
-    ctx.stroke();
+    ring(X(0), Y(burstY), size * (0.1 + 0.08 * (1 - view.cover)), COLORS.hurt, Math.max(3, size * 0.01));
     ctx.globalAlpha = 1;
   }
 }

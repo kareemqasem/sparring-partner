@@ -1,8 +1,8 @@
 // Step 2 of the plan: turn tracked body points into boxing moves.
 //
 // Feed it one frame at a time with update(frame, timeMs). It calls onMove
-// with one of: "jab", "cross", "left hook", "right hook", "body shot",
-// "slip left", "slip right", "block".
+// with one of: "jab", "cross", "left hook", "right hook", "chest shot",
+// "liver shot", "side shot", "slip left", "slip right", "block".
 //
 // Distances are measured against the boxer's own body (shoulder widths),
 // so the same numbers work near the camera or far from it.
@@ -47,6 +47,13 @@ export const TUNING = {
   bodyMinSpeed: 5,
   bodyOtherElbowUp: 0.1,  // the other arm is not busy throwing a head punch
   bodyRepeatMs: 900,      // both arms swing in one body punch; count it once
+  // Where a body punch goes. A hook to the body swings the fist wide of the
+  // body's centre line; a straight stays inside it. Sideways distances are
+  // in body widths. Your left hook lands on the opponent's liver.
+  zoneWaitMs: 200,        // wait this long after spotting a body punch
+  zoneWindowMs: 800,      // then look this far back for the swing
+  liverReach: 0.7,        // left fist at least this far out to your left
+  sideReach: 1.0,         // right fist at least this far out to your right
 
   // Slips: the head moves quickly sideways and dips while both elbows stay down.
   slipDistance: 0.3,      // head travel sideways, in body widths
@@ -91,6 +98,8 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   let lastTime = null;
   let lastPunchAt = -Infinity;
   let lastBodyAt = -Infinity;
+  let pendingBodyAt = null; // a body punch waiting to be assigned its zone
+  let fistTrail = []; // how far out to each side the fists have been lately
 
   let headNow = null;
   let headTrail = [];
@@ -107,11 +116,33 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
     if (move === "body shot") {
       if (time - lastBodyAt < T.bodyRepeatMs) return;
       lastBodyAt = time;
+      // A hook is often spotted while it is still dipping, before it swings
+      // wide. Wait a moment so the swing can show which zone it is going to.
+      hand.cooldownUntil = time + T.cooldownMs;
+      lastPunchAt = time;
+      slipPending = null;
+      pendingBodyAt = time + T.zoneWaitMs;
+      return;
     }
     hand.cooldownUntil = time + T.cooldownMs;
     lastPunchAt = time;
     slipPending = null;
     onMove(move);
+  }
+
+  // Which part of the body a body punch went to, from how wide each fist
+  // has just swung: "liver shot", "side shot" or "chest shot".
+  function bodyZone() {
+    let left = -Infinity;
+    let right = -Infinity;
+    for (const p of fistTrail) {
+      left = Math.max(left, p.left);
+      right = Math.max(right, p.right);
+    }
+    const liver = left / T.liverReach;
+    const side = right / T.sideReach;
+    if (liver < 1 && side < 1) return "chest shot";
+    return liver >= side ? "liver shot" : "side shot";
   }
 
   function resetHand(hand) {
@@ -134,9 +165,8 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
 
   // Decides what a finished swing was. Returns a move name or null.
   function classify(side, s) {
-    // A body punch. Crouched, both arms move a lot and the camera cannot
-    // reliably say which hand threw it or whether it was a straight or a
-    // hook, so it is reported simply as a body shot.
+    // A body punch. Which part of the body it went to is worked out when it
+    // is called, from how wide the fists swung (see bodyZone).
     const isBody =
       s.lowestFist <= T.bodyFist &&
       s.peakElbowUp <= T.bodyElbowUp &&
@@ -337,6 +367,19 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
       measureArm("left", image);
       measureArm("right", image);
 
+      // How far each fist is out to its own side of the body's centre line.
+      // The picture is not mirrored: your left is the picture's right.
+      const { leftShoulder: ls, rightShoulder: rs, leftWrist: lw, rightWrist: rw } = image;
+      if (bodyScale > 0 && seen(ls) && seen(rs)) {
+        const centre = (ls.x + rs.x) / 2;
+        fistTrail.push({
+          time,
+          left: seen(lw) ? (lw.x - centre) / bodyScale : -Infinity,
+          right: seen(rw) ? (centre - rw.x) / bodyScale : -Infinity,
+        });
+        while (fistTrail.length > 1 && time - fistTrail[0].time > T.zoneWindowMs) fistTrail.shift();
+      }
+
       if (seen(world.leftShoulder) && seen(world.rightShoulder)) {
         const shoulderWidth = dist(world.leftShoulder, world.rightShoulder);
         if (shoulderWidth > 0.05) {
@@ -344,6 +387,11 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
           updateHand("right", frame, shoulderWidth, time);
         }
       }
+      if (pendingBodyAt !== null && time >= pendingBodyAt) {
+        pendingBodyAt = null;
+        onMove(bodyZone());
+      }
+
       updateHead(image, time);
       updateBlock(image, time);
     },

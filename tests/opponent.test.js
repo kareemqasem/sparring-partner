@@ -171,9 +171,16 @@ test("nothing happens before start or after stop", () => {
   assert.deepEqual(events, []);
 });
 
-// --- Hard level: a guard to punch around, body shots, and counters ---
+// --- Hard level: one open target to find, body shots, counters, combinations ---
 
-function hard(overrides = {}, randomValues = [0.1]) {
+// Rolls for choosing what to leave open. From a closed guard the four
+// targets are equally likely; from an open one the choice is between the
+// other three targets and closing up.
+const FROM_CLOSED = { head: 0.1, chest: 0.3, liver: 0.6, side: 0.9 };
+const FIRST = 0;   // the first of the options on offer
+const ANY = 0.5;   // a roll whose value does not matter
+
+function hard(overrides = {}, randomValues = [ANY]) {
   const events = [];
   const opponent = createOpponent({
     random: scripted(randomValues),
@@ -181,84 +188,134 @@ function hard(overrides = {}, randomValues = [0.1]) {
     onEvent: (e) =>
       events.push(
         e.type + (e.target ? ":" + e.target : "") + (e.result ? ":" + e.result : "") +
-          (e.guardLevel ? ":" + e.guardLevel : "") + (e.where ? ":" + e.where : "") +
+          (e.open ? ":" + e.open : "") + (e.where ? ":" + e.where : "") +
           (e.counter ? ":counter" : ""),
       ),
     config: {
-      guardMinMs: 3000, guardMaxMs: 3000, shiftMinMs: 1000, shiftMaxMs: 1000,
+      guardMinMs: 6000, guardMaxMs: 6000, shiftMinMs: 800, shiftMaxMs: 800, openGraceMs: 250,
       windupMs: 500, strikeMs: 300, recoverMs: 800, hurtMs: 400, coverUpMs: 600,
-      bodyAttackChance: 0, counterChance: 0, counterWindupMs: 400, ...overrides,
+      bodyAttackChance: 0, counterChance: 0, counterWindupMs: 300, comboChance: 0, comboWindupMs: 350,
+      ...overrides,
     },
   });
   opponent.start(0);
   return { opponent, events };
 }
 
-test("hard: it starts with a high guard, so the body is open and the head is covered", () => {
-  const { opponent, events } = hard();
-  assert.equal(opponent.view(100).guardLevel, "high");
-  opponent.playerMove("jab", 200);
-  opponent.playerMove("body shot", 400);
-  assert.deepEqual(events, ["blocked:head", "landed:body"]);
+test("hard: only the open target can be hit", () => {
+  const { opponent, events } = hard({}, [ANY, FROM_CLOSED.chest, ANY]);
+  assert.equal(opponent.view(100).open, "chest");
+  opponent.playerMove("jab", 100);
+  opponent.playerMove("liver shot", 200);
+  opponent.playerMove("chest shot", 300);
+  assert.deepEqual(events, ["shift:chest", "blocked:head", "blocked:liver", "landed:chest"]);
   assert.equal(opponent.score().landed, 1);
 });
 
-test("hard: the guard shifts low, then the head is open and the body is covered", () => {
-  const { opponent, events } = hard();
-  opponent.update(1100);
-  assert.equal(opponent.view(1100).guardLevel, "low");
-  opponent.playerMove("body shot", 1200);
-  opponent.playerMove("cross", 1300);
-  assert.deepEqual(events, ["shift:low", "blocked:body", "landed:head"]);
+test("hard: each punch goes to its own target", () => {
+  for (const [target, move] of [["head", "cross"], ["liver", "liver shot"], ["side", "side shot"]]) {
+    const { opponent, events } = hard({}, [ANY, FROM_CLOSED[target], ANY]);
+    opponent.playerMove(move, 100);
+    assert.equal(events.at(-1), "landed:" + target);
+  }
+});
+
+test("hard: the open target changes in under a second, never to the same one", () => {
+  const { opponent } = hard({}, [ANY, FROM_CLOSED.chest, ANY, FIRST, ANY, FIRST, ANY]);
+  const seen = [opponent.view(0).open];
+  for (const t of [800, 1600]) {
+    opponent.update(t);
+    seen.push(opponent.view(t).open);
+  }
+  assert.equal(seen[0], "chest");
+  assert.notEqual(seen[1], seen[0]);
+  assert.notEqual(seen[2], seen[1]);
+});
+
+test("hard: a punch read just after its target closed still lands, a late one does not", () => {
+  const justAfter = hard({}, [ANY, FROM_CLOSED.chest, ANY, FIRST, ANY]);
+  justAfter.opponent.update(800);
+  justAfter.opponent.playerMove("chest shot", 950);
+  assert.equal(justAfter.events.at(-1), "landed:chest");
+
+  const late = hard({}, [ANY, FROM_CLOSED.chest, ANY, FIRST, ANY]);
+  late.opponent.update(800);
+  late.opponent.playerMove("chest shot", 1200);
+  assert.equal(late.events.at(-1), "blocked:chest");
+});
+
+test("hard: after being hit it does not leave the same target open", () => {
+  const { opponent } = hard({}, [ANY, FROM_CLOSED.chest, ANY]);
+  opponent.playerMove("chest shot", 100);
+  opponent.update(500);
+  assert.equal(opponent.view(500).state, "guard");
+  assert.notEqual(opponent.view(500).open, "chest");
+  opponent.playerMove("chest shot", 520);
+  assert.equal(opponent.score().landed, 1);
+});
+
+test("hard: land twice on one target and it always counters when you go back", () => {
+  // Counters are switched almost off, so a counter here can only come from
+  // it having grown wary of the chest.
+  const { opponent, events } = hard(
+    { counterChance: 0.001, shiftMinMs: 5000, shiftMaxMs: 5000 },
+    [ANY, FROM_CLOSED.chest, ANY],
+  );
+  opponent.playerMove("chest shot", 100);   // first hit
+  opponent.update(500);                      // back in guard, chest covered
+  opponent.playerMove("chest shot", 900);   // blocked, and no counter yet
+  assert.equal(events.at(-1), "blocked:chest");
+
+  const wary = hard(
+    { counterChance: 0.001, shiftMinMs: 5000, shiftMaxMs: 5000, wiseAfter: 1 },
+    [ANY, FROM_CLOSED.chest, ANY],
+  );
+  wary.opponent.playerMove("chest shot", 100);
+  wary.opponent.update(500);
+  wary.opponent.playerMove("chest shot", 900);
+  assert.equal(wary.events.at(-1), "windup:head:counter");
 });
 
 test("hard: its body shot can only be ducked", () => {
   const blocked = hard({ bodyAttackChance: 1 });
-  blocked.opponent.update(3000, { head: HEAD });
-  blocked.opponent.update(3500, { head: { x: 3.5, y: 4 }, blocking: true }); // slip and block
+  blocked.opponent.update(6000, { head: HEAD });
+  blocked.opponent.update(6500, { head: { x: 3.5, y: 4 }, blocking: true }); // slip and block
   assert.equal(blocked.events.at(-1), "strike:body:hit");
 
   const ducked = hard({ bodyAttackChance: 1 });
-  ducked.opponent.update(3000, { head: HEAD });
-  ducked.opponent.update(3400, { head: { x: 3, y: 4.5 } });
-  ducked.opponent.update(3500, { head: { x: 3, y: 4.5 } });
+  ducked.opponent.update(6000, { head: HEAD });
+  ducked.opponent.update(6400, { head: { x: 3, y: 4.5 } });
+  ducked.opponent.update(6500, { head: { x: 3, y: 4.5 } });
   assert.equal(ducked.events.at(-1), "strike:body:ducked");
-  assert.equal(ducked.opponent.score().avoided, 1);
 });
 
-test("hard: the warning is half a second", () => {
-  const { opponent } = hard();
-  opponent.update(3000, { head: HEAD });
-  assert.equal(opponent.view(3000).state, "windup");
-  opponent.update(3499, { head: HEAD });
-  assert.equal(opponent.view(3499).state, "windup");
-  opponent.update(3500, { head: HEAD });
-  assert.equal(opponent.view(3500).state, "strike");
-});
-
-test("hard: it blocks a body punch and counters to the head", () => {
-  const { opponent, events } = hard({ counterChance: 1 });
-  opponent.update(1100, { head: HEAD }); // guard is now low: body covered
-  opponent.playerMove("body shot", 1200);
-  assert.deepEqual(events, ["shift:low", "blocked:body", "windup:head:counter"]);
-  opponent.update(1600, { head: HEAD });
+test("hard: it blocks a body punch and counters to the head in 0.3 seconds", () => {
+  const { opponent, events } = hard({ counterChance: 1 }, [ANY, FROM_CLOSED.head, ANY]);
+  opponent.playerMove("liver shot", 1000 - 900);
+  assert.deepEqual(events.slice(-2), ["blocked:liver", "windup:head:counter"]);
+  opponent.update(399, { head: HEAD });
+  assert.equal(opponent.view(399).state, "windup");
+  opponent.update(400, { head: HEAD });
   assert.equal(events.at(-1), "strike:head:hit");
 });
 
-test("hard: the counter can be avoided like any other punch", () => {
-  const { opponent, events } = hard({ counterChance: 1 });
-  opponent.update(1100, { head: HEAD });
-  opponent.playerMove("body shot", 1200);
-  opponent.update(1500, { head: { x: 3.4, y: 4 } });
-  opponent.update(1600, { head: { x: 3.4, y: 4 } });
-  assert.equal(events.at(-1), "strike:head:slipped");
+test("hard: a counter can be two punches, the second to the other level", () => {
+  const { opponent, events } = hard({ counterChance: 1, comboChance: 1 }, [ANY, FROM_CLOSED.head, ANY]);
+  opponent.playerMove("chest shot", 100);          // blocked, counter to the head
+  opponent.update(400, { head: HEAD });             // first punch lands
+  opponent.update(700, { head: HEAD });             // second punch loads, to the body
+  assert.equal(events.at(-1), "windup:body:counter");
+  opponent.update(1000, { head: { x: 3, y: 4.5 } }); // ducked
+  opponent.update(1050, { head: { x: 3, y: 4.5 } });
+  assert.deepEqual(events.slice(-4), ["windup:head:counter", "strike:head:hit", "windup:body:counter", "strike:body:ducked"]);
+  assert.deepEqual(opponent.score(), { landed: 0, avoided: 1, taken: 1 });
 });
 
-test("easy: a body shot is just another punch, and no guard shifting", () => {
+test("easy: a body punch is just another punch, and the guard has no gaps", () => {
   const { opponent, events } = setup(OPEN);
-  assert.equal(opponent.view(500).guardLevel, "full");
-  opponent.playerMove("body shot", 500);
+  assert.equal(opponent.view(500).open, "full");
+  opponent.playerMove("chest shot", 500);
   opponent.update(1400); // it covered up first, so it opens a little later
-  opponent.playerMove("body shot", 1500);
-  assert.deepEqual(events, ["blocked:body", "open", "landed:body"]);
+  opponent.playerMove("liver shot", 1500);
+  assert.deepEqual(events, ["blocked", "open", "landed"]);
 });
