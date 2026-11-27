@@ -5,10 +5,10 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=14";
-import { createMoveDetector } from "./moves.js?v=14";
-import { createOpponent } from "./opponent.js?v=14";
-import { drawOpponent } from "./ring.js?v=14";
+import { createTracker, BONES } from "./pose.js?v=15";
+import { createMoveDetector } from "./moves.js?v=15";
+import { createOpponent } from "./opponent.js?v=15";
+import { drawOpponent } from "./ring.js?v=15";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -33,6 +33,8 @@ const scoreEl = document.getElementById("score");
 const voiceBox = document.getElementById("voice");
 const calloutsEl = document.getElementById("callouts");
 const toolsEl = document.getElementById("tools");
+const levelEl = document.getElementById("level");
+const levelLabel = document.getElementById("level-label");
 
 const MIN_VISIBILITY = 0.5;
 const STANCE = "orthodox";
@@ -372,7 +374,8 @@ let hitTimer = null;
 const opponent = createOpponent({
   onEvent(event) {
     if (event.type === "windup") {
-      tone(520, 0.18, "square", 0.25); // warning: a punch is coming
+      // Warning: a punch is coming. A low tone means it is going to the body.
+      tone(event.target === "body" ? 260 : 520, 0.18, "square", 0.25);
     } else if (event.type === "open") {
       tone(1320, 0.12);                // its guard is down: hit it
     } else if (event.type === "recover") {
@@ -380,13 +383,13 @@ const opponent = createOpponent({
       tone(1320, 0.12);
     } else if (event.type === "strike") {
       if (event.result === "hit") {
-        flash("hit!");
+        flash(event.target === "body" ? "body hit!" : "hit!");
         tone(110, 0.35, "sawtooth", 0.5);
         stageEl.classList.add("hit");
         clearTimeout(hitTimer);
         hitTimer = setTimeout(() => stageEl.classList.remove("hit"), 250);
       } else {
-        flash(event.result === "slipped" ? "slipped!" : "blocked!");
+        flash(event.result + "!");
         tone(700, 0.1);
       }
     } else if (event.type === "landed") {
@@ -411,6 +414,8 @@ function showScore() {
 
 function setSparring(on) {
   sparring = on;
+  levelEl.disabled = on;
+  if (on) opponent.setLevel(levelEl.value);
   stageEl.classList.toggle("sparring", on);
   scoreEl.hidden = !on;
   sparBtn.textContent = on ? "Stop sparring" : "Start sparring";
@@ -523,6 +528,7 @@ startBtn.addEventListener("click", async () => {
     const tracker = await createTracker();
     startBtn.hidden = true;
     sparBtn.hidden = false;
+    levelLabel.hidden = false;
     calloutsEl.hidden = false;
     toolsEl.hidden = false;
     say("Ready");
