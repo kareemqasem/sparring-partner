@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sparring Partner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Sparring Partner</h1>
+      <p id="status">Press start, allow the camera, then step back until your upper body is in view.</p>
+    </header>
+
+    <div id="stage">
+      <video id="camera" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div id="controls">
+      <button id="start" type="button">Start camera</button>
+      <span id="readout"></span>
+    </div>
+  </main>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
