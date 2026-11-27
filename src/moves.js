@@ -4,29 +4,50 @@
 // with one of: "jab", "cross", "left hook", "right hook", "slip left",
 // "slip right", "block".
 //
-// Distances are measured in shoulder widths, so the same numbers work
-// whether you stand near the camera or far from it.
+// Distances are measured against the boxer's own body (shoulder widths),
+// so the same numbers work near the camera or far from it.
+//
+// The numbers in TUNING were set from a labelled 75-second recording of
+// one boxer (orthodox, laptop camera). They are a starting point, not a
+// universal truth: re-check them against new recordings.
 
 export const TUNING = {
-  speedWindowMs: 80,     // hand speed is averaged over this long
-  strikeStartSpeed: 3.5, // shoulder widths per second that starts a punch
-  strikeEndSpeed: 1.5,   // below this the punch is over
-  strikeMaxMs: 450,      // a punch never lasts longer than this
-  cooldownMs: 300,       // ignore the hand while it returns to guard
-  straightReach: 0.9,    // arm at least this straight (1 = fully straight)
+  speedWindowMs: 80,      // hand speed is averaged over this long
+  strikeStartSpeed: 3.5,  // shoulder widths per second that starts a punch
+  strikeEndSpeed: 1.5,    // below this the punch is over
+  strikeMaxMs: 450,       // a punch never lasts longer than this
+  cooldownMs: 500,        // ignore the hand while it returns to guard
+
+  // Straight punches (jab, cross): the arm snaps straight while still fast.
+  straightReach: 0.9,     // arm at least this straight (1 = fully straight)
   straightReachGain: 0.12,// and it must have straightened by this much
-  hookTravel: 0.4,       // sideways travel across the body for a hook
-  slipDistance: 0.45,    // head travel sideways for a slip
-  slipRearm: 0.2,        // head must come back this close before the next slip
-  sideOnRatio: 0.45,     // shoulders this narrow in the picture = turned side-on
-  slipQuietSpeed: 2.5,   // hands must be slower than this for a head move to be a slip
-  slipQuietMs: 400,      // and must have been that slow for this long
-  headSettleSec: 1.5,    // how quickly "normal head position" follows you
-  blockHoldMs: 120,      // both gloves up for this long counts as a block
-  blockHeight: 0.35,     // gloves no lower than this far below the nose
-  blockWidth: 0.7,       // gloves no further than this to the side of the nose
+  straightMinSpeed: 3,    // and still be moving this fast when it gets there
+  straightFistLead: 0.23, // if the elbow is lifted, the fist must still be this
+                          // much higher than it. In a hook they come up level.
+
+  // Hooks: a fast swing with the elbow lifted to about shoulder height,
+  // that never snapped straight.
+  hookMinSpeed: 6,        // fastest point of the swing
+  hookElbowUp: -0.2,      // elbow height vs shoulder (0 = level, -1 = hanging)
+
+  // Turned side-on, the far arm is hidden behind the body and its tracked
+  // position is a guess, so it is ignored.
+  turnedRatio: 0.6,       // how much further back one shoulder is than the other
+  armVisibility: 0.7,     // an arm must be seen this clearly to count its punches
+
+  // Slips: the head moves sideways while both elbows stay down in guard.
+  slipDistance: 0.33,     // head travel sideways
+  slipRearm: 0.15,        // head must come back this close before the next slip
+  slipElbowDown: -0.7,    // both elbows lower than this
+  slipConfirmMs: 220,     // must stay true this long (a punch wind-up does not)
+  headSettleSec: 1.5,     // how quickly "normal head position" follows you
+
+  // Block: both gloves up by the head and held.
+  blockHoldMs: 120,
+  blockHeight: 0.35,      // gloves no lower than this far below the nose
+  blockWidth: 0.7,        // gloves no further than this to the side of the nose
+
   minVisibility: 0.5,
-  armVisibility: 0.7,    // an arm must be seen this clearly to count its punches
 };
 
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
@@ -36,15 +57,26 @@ const dist = (a, b) => len(sub(a, b));
 export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tuning = {} } = {}) {
   const T = { ...TUNING, ...tuning };
   const seen = (p) => p && (p.visibility ?? 1) >= T.minVisibility;
+  const clear = (p) => p && (p.visibility ?? 1) >= T.armVisibility;
 
-  const newHand = () => ({ history: [], strike: null, cooldownUntil: 0, speed: 0, reach: 0 });
+  const newHand = () => ({
+    history: [],
+    strike: null,
+    cooldownUntil: 0,
+    speed: 0,
+    reach: 0,
+    elbowUp: -1,
+  });
   const hands = { left: newHand(), right: newHand() };
 
-  let headHome = null;
-  let bodyScale = 0;
-  let handsBusyAt = -Infinity;
+  let bodyScale = 0; // shoulder width in the picture, at its widest lately
   let lastTime = null;
+  let lastPunchAt = -Infinity;
+
+  let headHome = null;
   let slipArmed = true;
+  let slipPending = null;
+
   let glovesUpSince = null;
   let blocking = false;
 
@@ -53,42 +85,45 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
     return side === leadSide ? "jab" : "cross";
   };
 
-  function finishStrike(side, hand, time) {
-    const s = hand.strike;
-    hand.strike = null;
-
-    // Straights are called the moment the arm straightens (see updateHand).
-    // What is left here is a fast swing that never straightened: a hook.
-    if (!s.called && s.peakInward >= T.hookTravel) {
-      hand.cooldownUntil = time + T.cooldownMs;
-      onMove(side + " hook");
-    }
+  function call(hand, move, time) {
+    hand.cooldownUntil = time + T.cooldownMs;
+    lastPunchAt = time;
+    slipPending = null;
+    onMove(move);
   }
 
-  function updateHand(side, world, shoulderWidth, time, sideOn) {
+  function resetHand(hand) {
+    hand.history = [];
+    hand.strike = null;
+    hand.speed = 0;
+    hand.reach = 0;
+  }
+
+  function updateHand(side, frame, shoulderWidth, time, hidden) {
     const hand = hands[side];
-    const other = side === "left" ? "right" : "left";
+    const { world, image } = frame;
     const shoulder = world[side + "Shoulder"];
     const elbow = world[side + "Elbow"];
     const wrist = world[side + "Wrist"];
-    const otherShoulder = world[other + "Shoulder"];
 
-    const clear = (p) => p && (p.visibility ?? 1) >= T.armVisibility;
-    if (!seen(shoulder) || !clear(elbow) || !clear(wrist)) {
-      hand.history = [];
-      hand.strike = null;
-      hand.speed = 0;
-      hand.reach = 0;
+    // Elbow height in the picture, compared with its own shoulder.
+    const imgShoulder = image[side + "Shoulder"];
+    const imgElbow = image[side + "Elbow"];
+    hand.elbowUp =
+      bodyScale > 0 && seen(imgShoulder) && seen(imgElbow)
+        ? (imgShoulder.y - imgElbow.y) / bodyScale
+        : -1;
+
+    if (hidden || !seen(shoulder) || !clear(elbow) || !clear(wrist)) {
+      resetHand(hand);
       return;
     }
 
     // Wrist position measured from its own shoulder, so stepping around
     // the room does not look like a punch.
     const rel = sub(wrist, shoulder);
-    // 1 when the arm is fully straight, small when the fist is at the chin.
+    // 1 when the arm is fully straight, smaller as the elbow bends.
     const reach = dist(shoulder, wrist) / (dist(shoulder, elbow) + dist(elbow, wrist));
-    // Which way is "across the body" for this hand.
-    const inwardSign = Math.sign(otherShoulder.x - shoulder.x) || 1;
 
     hand.history.push({ time, rel, reach });
     while (hand.history.length > 2 && time - hand.history[0].time > T.speedWindowMs) {
@@ -101,82 +136,95 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
     const speed = dist(rel, oldest.rel) / seconds / shoulderWidth;
     hand.speed = speed;
     hand.reach = reach;
+    // How far the fist is above the elbow (y grows downward).
+    const fistLead = (elbow.y - wrist.y) / shoulderWidth;
+    const looksLikeHook = hand.elbowUp >= T.hookElbowUp && fistLead < T.straightFistLead;
 
     if (!hand.strike) {
-      // Turned fully side-on, one arm is hidden behind the body and its
-      // tracked position is a guess, so no new punch is started from it.
-      if (!sideOn && speed >= T.strikeStartSpeed && time >= hand.cooldownUntil) {
-        hand.strike = {
-          startTime: oldest.time,
-          startRel: oldest.rel,
-          startReach: oldest.reach,
-          peakReach: reach,
-          peakInward: 0,
-          called: false,
-        };
-      }
-      if (!hand.strike) return;
+      if (speed < T.strikeStartSpeed || time < hand.cooldownUntil) return;
+      hand.strike = {
+        startTime: oldest.time,
+        startReach: oldest.reach,
+        peakSpeed: speed,
+        peakElbowUp: hand.elbowUp,
+        called: false,
+      };
     }
 
     const s = hand.strike;
-    s.peakReach = Math.max(s.peakReach, reach);
-    const inward = ((rel.x - s.startRel.x) * inwardSign) / shoulderWidth;
-    s.peakInward = Math.max(s.peakInward, inward);
+    s.peakSpeed = Math.max(s.peakSpeed, speed);
+    s.peakElbowUp = Math.max(s.peakElbowUp, hand.elbowUp);
 
-    // Call a straight punch right away, without waiting for the hand to stop.
-    if (!s.called && !sideOn && reach >= T.straightReach && reach - s.startReach >= T.straightReachGain) {
+    // A straight punch is called the moment the arm snaps straight,
+    // without waiting for the hand to stop.
+    if (
+      !s.called &&
+      reach >= T.straightReach &&
+      reach - s.startReach >= T.straightReachGain &&
+      speed >= T.straightMinSpeed &&
+      !looksLikeHook
+    ) {
       s.called = true;
-      hand.cooldownUntil = time + T.cooldownMs;
-      onMove(straightName(side));
+      call(hand, straightName(side), time);
     }
 
     if (speed < T.strikeEndSpeed || time - s.startTime > T.strikeMaxMs) {
-      finishStrike(side, hand, time);
+      hand.strike = null;
+      // A fast swing with the elbow up that never snapped straight: a hook.
+      if (!s.called && s.peakSpeed >= T.hookMinSpeed && s.peakElbowUp >= T.hookElbowUp) {
+        call(hand, side + " hook", time);
+      }
     }
   }
 
   function updateHead(image, time, dtSec) {
-    const { nose, leftShoulder, rightShoulder } = image;
-    if (!seen(nose) || !seen(leftShoulder) || !seen(rightShoulder)) return;
-
-    if (bodyScale < 0.01) return;
-
-    // Punching moves the head too. Only a head move with quiet hands is a slip.
-    const handsBusy =
-      hands.left.strike || hands.right.strike ||
-      hands.left.speed > T.slipQuietSpeed || hands.right.speed > T.slipQuietSpeed;
-    if (handsBusy) handsBusyAt = time;
-    const quiet = time - handsBusyAt >= T.slipQuietMs;
+    const { nose } = image;
+    if (!seen(nose) || bodyScale < 0.01) {
+      slipPending = null;
+      return;
+    }
 
     if (headHome === null) headHome = nose.x;
     const offset = (nose.x - headHome) / bodyScale;
 
-    if (!quiet) {
-      // Do not let a punch arm or fire a slip.
-    } else if (slipArmed && Math.abs(offset) >= T.slipDistance) {
-      slipArmed = false;
+    // In a slip the hands stay home: both elbows down, no punch just thrown.
+    const guardHeld =
+      hands.left.elbowUp <= T.slipElbowDown &&
+      hands.right.elbowUp <= T.slipElbowDown &&
+      time - lastPunchAt >= T.cooldownMs;
+
+    if (!slipArmed) {
+      if (Math.abs(offset) <= T.slipRearm) slipArmed = true;
+    } else if (Math.abs(offset) >= T.slipDistance && guardHeld) {
       // The camera picture is not mirrored: your left is the picture's right.
-      onMove(offset > 0 ? "slip left" : "slip right");
-    } else if (!slipArmed && Math.abs(offset) <= T.slipRearm) {
-      slipArmed = true;
+      const move = offset > 0 ? "slip left" : "slip right";
+      if (!slipPending || slipPending.move !== move) slipPending = { move, since: time };
+      if (time - slipPending.since >= T.slipConfirmMs) {
+        slipPending = null;
+        slipArmed = false;
+        onMove(move);
+      }
+    } else {
+      slipPending = null;
     }
 
-    // "Home" slowly follows the head, so stepping to a new spot resets it.
-    const follow = 1 - Math.exp(-dtSec / T.headSettleSec);
+    // "Home" follows the head so stepping to a new spot resets it, but only
+    // slowly while the head is off to one side, or a slip would drag it along.
+    const away = Math.abs(offset) > T.slipRearm;
+    const follow = 1 - Math.exp(-dtSec / (away ? T.headSettleSec * 6 : T.headSettleSec));
     headHome += (nose.x - headHome) * follow;
   }
 
   function updateBlock(image, time) {
-    const { nose, leftShoulder, rightShoulder, leftWrist, rightWrist } = image;
-    const usable = [nose, leftShoulder, rightShoulder, leftWrist, rightWrist].every(seen);
+    const { nose, leftWrist, rightWrist } = image;
+    const usable = [nose, leftWrist, rightWrist].every(seen) && bodyScale >= 0.01;
     const punching = hands.left.strike || hands.right.strike;
 
     let glovesUp = false;
     if (usable && !punching) {
-      const width = Math.abs(leftShoulder.x - rightShoulder.x);
       const isUp = (wrist) =>
-        wrist.y <= nose.y + T.blockHeight * width &&
-        Math.abs(wrist.x - nose.x) <= T.blockWidth * width;
+        wrist.y <= nose.y + T.blockHeight * bodyScale &&
+        Math.abs(wrist.x - nose.x) <= T.blockWidth * bodyScale;
       glovesUp = isUp(leftWrist) && isUp(rightWrist);
     }
 
@@ -200,19 +248,21 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
 
       const { image, world } = frame;
 
-      // Shoulder width in the picture shrinks when you turn side-on to punch,
-      // so everything is measured against the widest it has been lately.
-      let sideOn = false;
+      // Shoulder width in the picture shrinks when you turn to punch, so
+      // everything is measured against the widest it has been lately.
       if (seen(image.leftShoulder) && seen(image.rightShoulder)) {
         const width = Math.abs(image.leftShoulder.x - image.rightShoulder.x);
         bodyScale = Math.max(width, bodyScale * Math.exp(-dtSec / 10));
-        sideOn = width < T.sideOnRatio * bodyScale;
       }
+
       if (seen(world.leftShoulder) && seen(world.rightShoulder)) {
         const shoulderWidth = dist(world.leftShoulder, world.rightShoulder);
         if (shoulderWidth > 0.05) {
-          updateHand("left", world, shoulderWidth, time, sideOn);
-          updateHand("right", world, shoulderWidth, time, sideOn);
+          // Larger z is further from the camera. When one shoulder is well
+          // behind the other, that side's arm is hidden by the body.
+          const turn = (world.leftShoulder.z - world.rightShoulder.z) / shoulderWidth;
+          updateHand("left", frame, shoulderWidth, time, turn >= T.turnedRatio);
+          updateHand("right", frame, shoulderWidth, time, turn <= -T.turnedRatio);
         }
       }
       updateHead(image, time, dtSec);

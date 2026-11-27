@@ -5,8 +5,8 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=5";
-import { createMoveDetector } from "./moves.js?v=5";
+import { createTracker, BONES } from "./pose.js?v=6";
+import { createMoveDetector } from "./moves.js?v=6";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");

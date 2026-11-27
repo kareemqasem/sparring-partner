@@ -14,9 +14,11 @@ const GUARD = {
   rightWrist: [-0.12, -0.6, -0.2],
 };
 
-const LEFT_STRAIGHT = { leftElbow: [0.18, -0.5, -0.3], leftWrist: [0.18, -0.5, -0.6] };
-const RIGHT_STRAIGHT = { rightElbow: [-0.18, -0.5, -0.3], rightWrist: [-0.18, -0.5, -0.6] };
-const LEFT_HOOK = { leftElbow: [0.2, -0.5, -0.25], leftWrist: [-0.1, -0.5, -0.3] };
+// Straights are aimed at head height, so the fist ends above the elbow.
+const LEFT_STRAIGHT = { leftElbow: [0.18, -0.56, -0.3], leftWrist: [0.18, -0.68, -0.58] };
+const RIGHT_STRAIGHT = { rightElbow: [-0.18, -0.56, -0.3], rightWrist: [-0.18, -0.68, -0.58] };
+// A hook swings across with the elbow lifted level with the shoulder.
+const LEFT_HOOK = { leftElbow: [0.2, -0.5, -0.25], leftWrist: [-0.15, -0.52, -0.35] };
 const HIGH_GUARD = { leftWrist: [0.08, -0.78, -0.15], rightWrist: [-0.08, -0.78, -0.15] };
 
 const mix = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
@@ -81,7 +83,7 @@ test("a slow practice punch still counts", () => {
 });
 
 test("left hook", () => {
-  assert.deepEqual(run([[LEFT_HOOK, 150, 200]]), ["left hook"]);
+  assert.deepEqual(run([[LEFT_HOOK, 130, 200]]), ["left hook"]);
 });
 
 test("jab, cross, hook combination", () => {
@@ -92,7 +94,7 @@ test("jab, cross, hook combination", () => {
 });
 
 test("slips to each side", () => {
-  assert.deepEqual(run([[0.22, 150, 150, 100, true], [-0.22, 150, 150, 100, true]]), [
+  assert.deepEqual(run([[0.22, 150, 150, 300, true], [-0.22, 150, 150, 300, true]]), [
     "slip left",
     "slip right",
   ]);
@@ -100,4 +102,9 @@ test("slips to each side", () => {
 
 test("high guard held is one block", () => {
   assert.deepEqual(run([[HIGH_GUARD, 400, 400, 500]]), ["block"]);
+});
+
+test("a head move that is quickly followed by a punch is not a slip", () => {
+  // Leaning for 100 ms is a wind-up, not a slip.
+  assert.deepEqual(run([[0.22, 80, 80, 20, true]]), []);
 });
