@@ -5,8 +5,8 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=7";
-import { createMoveDetector } from "./moves.js?v=7";
+import { createTracker, BONES } from "./pose.js?v=8";
+import { createMoveDetector } from "./moves.js?v=8";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -124,47 +124,100 @@ function describeView(points) {
 const RECORD_COUNTDOWN_MS = 5000;
 const FREE_LENGTH_MS = 15000;
 const CUE_GAP_MS = 2500;
-// Each guided recording is a list of moves called out in order, several times round.
+const BLOCK_LEAD_MS = 3000; // time to hear the punch name and get set
+const BEEP_GAP_MS = 2000;
+
 const DRILLS = {
+  // Every move called out by name, one every few seconds, four times round.
   all: {
     rounds: 4,
     moves: ["jab", "cross", "left hook", "right hook", "slip left", "slip right", "block"],
     file: "sparring-guided-recording.json",
   },
-  // Punches only, in an order that puts the easily confused ones side by side.
+  // One punch at a time: the name is announced once, then each beep means
+  // "throw it now". Nothing to think about, so every punch has a sure label.
   punches: {
-    rounds: 4,
-    moves: ["jab", "left hook", "cross", "right hook", "left hook", "jab", "right hook", "cross"],
+    blocks: [
+      { move: "jab", reps: 6 },
+      { move: "cross", reps: 6 },
+      { move: "left hook", reps: 6 },
+      { move: "right hook", reps: 6 },
+    ],
     file: "sparring-punch-recording.json",
   },
 };
 
 let recording = null;
 
-function guidedCues(drill) {
+// The plan for a guided recording:
+//   events: what to say, show or beep, and when
+//   cues:   the answer key saved to the file (which move was asked for when)
+//   blocks: for block drills, the stretch of time that belongs to each punch
+function guidedPlan(drill) {
+  const events = [];
   const cues = [];
+  const blocks = [];
   let t = 2000; // two quiet seconds in guard first
-  for (let round = 0; round < drill.rounds; round++) {
-    for (const move of drill.moves) {
-      cues.push({ t, move });
-      t += CUE_GAP_MS;
+
+  if (drill.blocks) {
+    for (const block of drill.blocks) {
+      const start = t;
+      events.push({ t, say: block.move + "s", show: block.move });
+      t += BLOCK_LEAD_MS;
+      for (let i = 0; i < block.reps; i++) {
+        events.push({ t, beep: true, show: block.move });
+        cues.push({ t, move: block.move });
+        t += BEEP_GAP_MS;
+      }
+      blocks.push({ start, end: t, move: block.move });
+    }
+  } else {
+    for (let round = 0; round < drill.rounds; round++) {
+      for (const move of drill.moves) {
+        events.push({ t, say: move, show: move });
+        cues.push({ t, move });
+        t += CUE_GAP_MS;
+      }
     }
   }
-  return { cues, lengthMs: t + 500 };
+  return { events, cues, blocks, lengthMs: t + 500 };
+}
+
+// A short beep. Unlike the voice it plays instantly, so it marks time exactly.
+let audio = null;
+function beep() {
+  if (!audio) return;
+  const tone = audio.createOscillator();
+  const volume = audio.createGain();
+  tone.frequency.value = 880;
+  volume.gain.setValueAtTime(0.4, audio.currentTime);
+  volume.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.15);
+  tone.connect(volume).connect(audio.destination);
+  tone.start();
+  tone.stop(audio.currentTime + 0.15);
 }
 
 function startRecording(drillName) {
   const drill = DRILLS[drillName];
   const guided = Boolean(drill);
-  const plan = guided ? guidedCues(drill) : { cues: [], lengthMs: FREE_LENGTH_MS };
+  const plan = guided
+    ? guidedPlan(drill)
+    : { events: [], cues: [], blocks: [], lengthMs: FREE_LENGTH_MS };
+  // Sound can only be switched on from a button press, which this is.
+  if (!audio && (window.AudioContext || window.webkitAudioContext)) {
+    audio = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audio && audio.state === "suspended") audio.resume();
   recording = {
     guided,
     drill: drillName,
     file: guided ? drill.file : "sparring-recording.json",
     start: performance.now() + RECORD_COUNTDOWN_MS,
     lengthMs: plan.lengthMs,
+    events: plan.events,
     cues: plan.cues,
-    nextCue: 0,
+    blocks: plan.blocks,
+    nextEvent: 0,
     frames: [],
     moves: [],
     announced: false,
@@ -198,15 +251,21 @@ function record(frame, now) {
   }
 
   if (elapsed <= recording.lengthMs) {
-    const cue = recording.cues[recording.nextCue];
-    if (cue && elapsed >= cue.t) {
-      recording.nextCue += 1;
-      say(cue.move);
-      flash(cue.move);
+    const event = recording.events[recording.nextEvent];
+    if (event && elapsed >= event.t) {
+      recording.nextEvent += 1;
+      if (event.say) say(event.say);
+      if (event.beep) beep();
+      flash(event.show);
     }
     if (recording.guided) {
-      setStatus("Do each move once when you hear it, then return to guard. " +
-        recording.nextCue + " of " + recording.cues.length + ".");
+      const done = recording.cues.filter((cue) => cue.t <= elapsed).length;
+      setStatus(
+        (recording.blocks.length
+          ? "Throw the named punch once on every beep, then return to guard. "
+          : "Do each move once when you hear it, then return to guard. ") +
+          done + " of " + recording.cues.length + ".",
+      );
     }
     recording.frames.push(
       frame
@@ -223,6 +282,7 @@ function record(frame, now) {
     stance: STANCE,
     video: { width: video.videoWidth, height: video.videoHeight },
     cues: recording.cues,
+    blocks: recording.blocks,
     moves: recording.moves,
     frames: recording.frames,
   };
@@ -250,8 +310,8 @@ function run(tracker) {
       if (!(recording && recording.guided)) {
         say(move);
         flash(move);
+        showMove(move);
       }
-      showMove(move);
       if (recording) recording.moves.push({ t: Math.round(performance.now() - recording.start), move });
     },
   });
