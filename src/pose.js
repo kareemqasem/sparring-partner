@@ -45,19 +45,26 @@ export async function createTracker() {
     numPoses: 1,
   });
 
+  const pick = (body) => {
+    const named = {};
+    for (const [name, index] of Object.entries(POINTS)) {
+      named[name] = body[index];
+    }
+    return named;
+  };
+
   return {
     // Returns the named points for one video frame, or null if nobody is seen.
-    // Each point is { x, y, visibility } with x and y from 0 to 1.
+    //   image: where each point is in the picture (x and y from 0 to 1)
+    //   world: where each point is in real space, in metres, measured from
+    //          the hips. This is what lets us see a punch thrown straight
+    //          at the camera.
     track(video, timeMs) {
       const result = landmarker.detectForVideo(video, timeMs);
-      const body = result.landmarks && result.landmarks[0];
-      if (!body) return null;
-
-      const named = {};
-      for (const [name, index] of Object.entries(POINTS)) {
-        named[name] = body[index];
-      }
-      return named;
+      const image = result.landmarks && result.landmarks[0];
+      const world = result.worldLandmarks && result.worldLandmarks[0];
+      if (!image || !world) return null;
+      return { image: pick(image), world: pick(world) };
     },
   };
 }

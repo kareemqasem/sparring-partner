@@ -1,7 +1,8 @@
-// Step 1 of the plan: turn on the camera and track the boxer's body.
-// It draws a skeleton over the video so we can see how well tracking works.
+// Steps 1 and 2 of the plan: turn on the camera, track the boxer's body,
+// and call out each move it recognises so we can check it by ear.
 
 import { createTracker, BONES } from "./pose.js";
+import { createMoveDetector } from "./moves.js";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -10,7 +11,27 @@ const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("start");
 const readout = document.getElementById("readout");
 
+const movesEl = document.getElementById("moves");
+
 const MIN_VISIBILITY = 0.5;
+const STANCE = "orthodox";
+
+// Says the move out loud. A new call-out cuts off the previous one so the
+// voice keeps up with fast combinations.
+function say(text) {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const words = new SpeechSynthesisUtterance(text);
+  words.rate = 1.4;
+  window.speechSynthesis.speak(words);
+}
+
+const recentMoves = [];
+function showMove(move) {
+  recentMoves.unshift(move);
+  recentMoves.length = Math.min(recentMoves.length, 6);
+  movesEl.textContent = recentMoves.join("  \u2190  ");
+}
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
@@ -71,6 +92,14 @@ function describeView(points) {
 }
 
 function run(tracker) {
+  const detector = createMoveDetector({
+    stance: STANCE,
+    onMove(move) {
+      say(move);
+      showMove(move);
+    },
+  });
+
   let lastVideoTime = -1;
   let frames = 0;
   let fpsStart = performance.now();
@@ -78,9 +107,12 @@ function run(tracker) {
   function loop() {
     if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
-      const points = tracker.track(video, performance.now());
+      const now = performance.now();
+      const frame = tracker.track(video, now);
+      const points = frame ? frame.image : null;
       draw(points);
       setStatus(describeView(points));
+      detector.update(frame, now);
 
       frames += 1;
       const elapsed = performance.now() - fpsStart;
@@ -117,6 +149,7 @@ startBtn.addEventListener("click", async () => {
     setStatus("Loading body tracking. The first time takes a few seconds...");
     const tracker = await createTracker();
     startBtn.hidden = true;
+    say("Ready");
     run(tracker);
   } catch (err) {
     console.error(err);

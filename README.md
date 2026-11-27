@@ -12,7 +12,7 @@ Version 1 goal: one working 3-minute round that scores hits and misses.
 
 - [x] Step 0: project setup
 - [x] Step 1: camera and body tracking (skeleton drawn over the video)
-- [ ] Step 2: recognise moves (jab, cross, hook, slip, block)
+- [x] Step 2: recognise moves (jab, cross, hook, slip, block), spoken out loud; needs tuning on real punches
 - [ ] Step 3: on-screen opponent
 - [ ] Step 4: scoring
 - [ ] Step 5: 3-minute round with timer and summary
@@ -33,3 +33,5 @@ directly from a folder will not work. Either:
 - `index.html`, `style.css`: the page
 - `src/main.js`: camera, drawing, and the main loop
 - `src/pose.js`: body tracking (MediaPipe Pose Landmarker)
+- `src/moves.js`: turns tracked points into moves; the `TUNING` numbers at the top control sensitivity
+- `tests/`: checks for move recognition, run with `npm test`
