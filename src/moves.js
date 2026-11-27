@@ -12,6 +12,7 @@
 // universal truth: re-check them against new recordings.
 
 export const TUNING = {
+  bodyScaleWindowMs: 3000,// body size is the widest the shoulders were in this long
   speedWindowMs: 80,      // hand speed is averaged over this long
   strikeStartSpeed: 3.5,  // shoulder widths per second that starts a punch
   strikeEndSpeed: 1.5,    // below this the punch is over
@@ -78,6 +79,7 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   const hands = { left: newHand(), right: newHand() };
 
   let bodyScale = 0; // shoulder width in the picture, at its widest lately
+  const widths = [];
   let lastTime = null;
   let lastPunchAt = -Infinity;
 
@@ -297,10 +299,14 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
       const { image, world } = frame;
 
       // Shoulder width in the picture shrinks when you turn to punch, so
-      // everything is measured against the widest it has been lately.
+      // everything is measured against the widest it has been in the last
+      // few seconds. Only a few seconds, so that walking back from the
+      // camera does not leave the scale stuck at its close-up size.
       if (seen(image.leftShoulder) && seen(image.rightShoulder)) {
-        const width = Math.abs(image.leftShoulder.x - image.rightShoulder.x);
-        bodyScale = Math.max(width, bodyScale * Math.exp(-dtSec / 10));
+        widths.push({ time, width: Math.abs(image.leftShoulder.x - image.rightShoulder.x) });
+        while (widths.length > 1 && time - widths[0].time > T.bodyScaleWindowMs) widths.shift();
+        bodyScale = 0;
+        for (const w of widths) bodyScale = Math.max(bodyScale, w.width);
       }
 
       measureArm("left", image);

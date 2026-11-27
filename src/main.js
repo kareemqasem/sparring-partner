@@ -5,10 +5,10 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=12";
-import { createMoveDetector } from "./moves.js?v=12";
-import { createOpponent } from "./opponent.js?v=12";
-import { drawOpponent } from "./ring.js?v=12";
+import { createTracker, BONES } from "./pose.js?v=13";
+import { createMoveDetector } from "./moves.js?v=13";
+import { createOpponent } from "./opponent.js?v=13";
+import { drawOpponent } from "./ring.js?v=13";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -132,7 +132,9 @@ function describeView(points) {
 //
 // A guided recording also calls out a move every few seconds and saves
 // which move was asked for when. That is the answer key for tuning.
-const RECORD_COUNTDOWN_MS = 5000;
+const RECORD_COUNTDOWN_MS = 3000; // after you are in position
+const IN_POSITION_MS = 1500;      // how long you must hold position first
+const FAR_ENOUGH = 0.24;          // shoulders no wider than this share of the picture
 const FREE_LENGTH_MS = 15000;
 const CUE_GAP_MS = 2500;
 const BLOCK_LEAD_MS = 3000; // time to hear the punch name and get set
@@ -243,7 +245,8 @@ function startRecording(drillName) {
     guided,
     drill: drillName,
     file: guided ? drill.file : "sparring-recording.json",
-    start: performance.now() + RECORD_COUNTDOWN_MS,
+    start: null,          // set once you are standing in position
+    inPositionSince: null,
     lengthMs: plan.lengthMs,
     events: plan.events,
     cues: plan.cues,
@@ -266,8 +269,36 @@ function compact(points) {
   return out;
 }
 
+// Far enough back that head, shoulders and both gloves fit, with room below
+// the gloves for body punches and ducks.
+function inPosition(points) {
+  if (!points) return false;
+  const needed = ["nose", "leftShoulder", "rightShoulder", "leftWrist", "rightWrist", "leftElbow", "rightElbow"];
+  if (!needed.every((name) => isSeen(points[name]))) return false;
+  const width = Math.abs(points.leftShoulder.x - points.rightShoulder.x);
+  const lowest = Math.max(points.leftElbow.y, points.rightElbow.y);
+  return width <= FAR_ENOUGH && lowest <= 0.8 && points.nose.y >= 0.08;
+}
+
 function record(frame, now) {
   if (!recording) return;
+
+  // Nothing starts until you are standing where the camera can see you.
+  if (recording.start === null) {
+    if (!inPosition(frame && frame.image)) {
+      recording.inPositionSince = null;
+      setStatus("Step back until your head, both gloves and elbows are in view, with space below them.");
+      return;
+    }
+    if (recording.inPositionSince === null) recording.inPositionSince = now;
+    setStatus("Good. Hold still...");
+    if (now - recording.inPositionSince < IN_POSITION_MS) return;
+    recording.start = now + RECORD_COUNTDOWN_MS;
+    say("Ready");
+    flash("ready");
+    return;
+  }
+
   const elapsed = now - recording.start;
   if (elapsed < 0) {
     setStatus("Recording starts in " + Math.ceil(-elapsed / 1000) + "... get into your guard.");
@@ -424,7 +455,9 @@ function run(tracker) {
         showMove(move);
       }
       if (sparring) opponent.playerMove(move, now);
-      if (recording) recording.moves.push({ t: Math.round(now - recording.start), move });
+      if (recording && recording.start !== null) {
+        recording.moves.push({ t: Math.round(now - recording.start), move });
+      }
     },
   });
 
