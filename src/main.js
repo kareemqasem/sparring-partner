@@ -5,10 +5,10 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=11";
-import { createMoveDetector } from "./moves.js?v=11";
-import { createOpponent } from "./opponent.js?v=11";
-import { drawOpponent } from "./ring.js?v=11";
+import { createTracker, BONES } from "./pose.js?v=12";
+import { createMoveDetector } from "./moves.js?v=12";
+import { createOpponent } from "./opponent.js?v=12";
+import { drawOpponent } from "./ring.js?v=12";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -22,7 +22,8 @@ const flashEl = document.getElementById("flash");
 const recordBtn = document.getElementById("record");
 const guidedBtn = document.getElementById("guided");
 const punchesBtn = document.getElementById("punches");
-const recordButtons = [recordBtn, guidedBtn, punchesBtn];
+const bodyBtn = document.getElementById("body");
+const recordButtons = [recordBtn, guidedBtn, punchesBtn, bodyBtn];
 const debugEl = document.getElementById("debug");
 const stageEl = document.getElementById("stage");
 const ringCanvas = document.getElementById("ring");
@@ -154,6 +155,18 @@ const DRILLS = {
       { move: "right hook", reps: 6 },
     ],
     file: "sparring-punch-recording.json",
+  },
+  // Body work: the four punches thrown to the body, then the body-shot
+  // defence (a duck with a small drop of the elbows).
+  body: {
+    blocks: [
+      { move: "body jab", reps: 6 },
+      { move: "body cross", reps: 6 },
+      { move: "body left hook", reps: 6 },
+      { move: "body right hook", reps: 6 },
+      { move: "duck", reps: 6 },
+    ],
+    file: "sparring-body-recording.json",
   },
 };
 
@@ -319,6 +332,7 @@ function record(frame, now) {
 recordBtn.addEventListener("click", () => startRecording(null));
 guidedBtn.addEventListener("click", () => startRecording("all"));
 punchesBtn.addEventListener("click", () => startRecording("punches"));
+bodyBtn.addEventListener("click", () => startRecording("body"));
 
 // Sparring: the opponent, what you see and hear when things happen, and the score.
 let sparring = false;
