@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createSession, frameAt, jointsAt, tallyAt, pickHighlights, JOINTS } from "../src/session.js";
 
-const body = (x) => Object.fromEntries(JOINTS.map((name) => [name, { x, y: 1, z: 2 }]));
+const body = (x) => ({
+  world: Object.fromEntries(JOINTS.map((name) => [name, { x, y: 1, z: 2 }])),
+  image: Object.fromEntries(JOINTS.map((name) => [name, { x: x / 2, y: 0.5, visibility: 1 }])),
+});
 
 function sample() {
   const recorder = createSession({ mode: "spar" });
-  for (let t = 0; t <= 1000; t += 20) recorder.frame(t, t === 500 ? null : body(t / 1000), 4, { state: "guard" });
+  for (let t = 0; t <= 1000; t += 20) recorder.frame(t, t === 500 ? null : body(t / 1000), { state: "guard" });
   recorder.event(100, { type: "windup" });
   recorder.event(300, { type: "strike", result: "slipped", target: "head" });
   recorder.event(600, { type: "landed", where: "chest", counter: true });
@@ -25,8 +28,10 @@ test("finds the frame at or just before a time", () => {
 test("joints are averaged over neighbouring frames and skip frames with nobody in view", () => {
   const session = sample();
   const joints = jointsAt(session, 200, 45);
-  assert.ok(Math.abs(joints.nose.x - 0.2) < 0.001);
-  assert.equal(joints.leftWrist.z, 2);
+  assert.ok(Math.abs(joints.world.nose.x - 0.2) < 0.001);
+  assert.equal(joints.world.leftWrist.z, 2);
+  assert.ok(Math.abs(joints.image.nose.x - 0.1) < 0.001);
+  assert.equal(joints.image.nose.visibility, 1);
   assert.ok(jointsAt(session, 500, 10) === null);
   assert.ok(jointsAt(session, 500, 45) !== null);
 });

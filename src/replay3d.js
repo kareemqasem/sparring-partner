@@ -9,8 +9,8 @@
 
 import { frameAt, jointsAt, tallyAt } from "./session.js";
 
-const BOXER_X = -0.52;
-const OPPONENT_X = 0.52;
+const BOXER_X = -0.43;
+const OPPONENT_X = 0.43;
 const HIP_HEIGHT = 0.9;
 const BOXER = "#ffffff";
 const OPPONENT = "#ff2d3d";
@@ -70,15 +70,180 @@ export function makeCamera(eye, target, width, height, fov = 38) {
   };
 }
 
-// --- the boxer's skeleton, from tracked joints ------------------------------
-// The tracker measures from the hips, with x to the boxer's left, y down
-// and z away from the camera. The boxer faced the camera, so "towards the
-// camera" becomes "towards the opponent".
-function boxerJoints(tracked, crouch) {
-  const base = v(BOXER_X, HIP_HEIGHT - crouch, 0);
-  const place = (p) => add(base, v(clamp(-p.z, -0.6, 0.95), -p.y, -p.x));
-  const j = {};
-  for (const name of Object.keys(tracked)) j[name] = place(tracked[name]);
+// --- the boxer's skeleton, rebuilt from what the camera saw -------------------
+// One camera cannot measure depth: a jab thrown straight ahead barely moves
+// in the picture. So the boxer is rebuilt from the things the camera reads
+// well, rather than from the tracker's 3D guess:
+//   - how straight each arm is        -> how far the fist reaches forward
+//   - where the fist is in the picture -> how high and how far to the side
+//   - how high the elbow is            -> whether the elbow hangs or lifts
+//   - where the shoulders are          -> ducking and moving side to side
+//   - which shoulder is further back   -> how much the body has turned
+// Sizes are those of an average adult; the picture gives the proportions.
+const SHOULDER_WIDTH = 0.38; // metres
+const CHEST_HEIGHT = 1.42;
+const UPPER_ARM = 0.3;
+const FOREARM = 0.3;
+const GUARD_REACH = 0.2;     // how far in front the fists sit in guard
+const FULL_REACH = 0.66;     // and at the end of a straight punch
+
+const percentile = (values, k) => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * k))];
+};
+const straightness = (w, side) => {
+  const s = w[side + "Shoulder"];
+  const e = w[side + "Elbow"];
+  const h = w[side + "Wrist"];
+  const whole = length(sub(e, s)) + length(sub(h, e));
+  return whole > 1e-6 ? length(sub(h, s)) / whole : 0;
+};
+const forwardReach = (straight) =>
+  GUARD_REACH + (FULL_REACH - GUARD_REACH) * ease(clamp((straight - 0.74) / 0.23, 0, 1));
+
+// Studies the whole round once, to learn the boxer's size in the picture,
+// where they usually stand, and how the camera was placed.
+function boxerModel(session) {
+  const aspect = session.meta.aspect || 16 / 9;
+  const seenFrames = session.frames.filter((f) => f.image);
+  const point = (arr, i) => v(arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]);
+  const J = { nose: 0, leftShoulder: 3, rightShoulder: 4, leftElbow: 5, rightElbow: 6, leftWrist: 7, rightWrist: 8 };
+
+  // Body size in the picture: the widest the shoulders were within a second
+  // and a half either side, so that turning side-on does not shrink it.
+  const widths = seenFrames.map((f) => Math.abs(f.image[J.leftShoulder * 3] - f.image[J.rightShoulder * 3]));
+  const scales = new Float32Array(seenFrames.length);
+  let from = 0;
+  let to = 0;
+  for (let i = 0; i < seenFrames.length; i++) {
+    while (seenFrames[i].t - seenFrames[from].t > 1500) from++;
+    while (to + 1 < seenFrames.length && seenFrames[to + 1].t - seenFrames[i].t <= 1500) to++;
+    let widest = 0.02;
+    for (let k = from; k <= to; k++) widest = Math.max(widest, widths[k]);
+    scales[i] = widest;
+  }
+  const scaleAt = (t) => {
+    if (seenFrames.length === 0) return 0.15;
+    let low = 0;
+    let high = seenFrames.length - 1;
+    while (low < high) {
+      const m = (low + high + 1) >> 1;
+      if (seenFrames[m].t <= t) low = m;
+      else high = m - 1;
+    }
+    return scales[low];
+  };
+
+  // Where the boxer usually is, ignoring the first moments of walking in.
+  const settled = seenFrames.filter((f) => f.t >= 1500);
+  const use = settled.length > 20 ? settled : seenFrames;
+  const midX = [];
+  const midY = [];
+  const headUp = [];
+  const fistUpWhenStraight = [];
+  for (const f of use) {
+    const s = scaleAt(f.t);
+    const ls = point(f.image, J.leftShoulder);
+    const rs = point(f.image, J.rightShoulder);
+    const mx = (ls.x + rs.x) / 2;
+    const my = (ls.y + rs.y) / 2;
+    midX.push(mx);
+    midY.push(my);
+    headUp.push((my - f.image[J.nose * 3 + 1]) / (s * aspect));
+    const w = {};
+    for (const [name, i] of Object.entries(J)) w[name] = point(f.world, i);
+    for (const side of ["left", "right"]) {
+      if (straightness(w, side) < 0.93) continue;
+      const up = (f.image[J[side + "Shoulder"] * 3 + 1] - f.image[J[side + "Wrist"] * 3 + 1]) / (s * aspect);
+      if (up > 0.15) fistUpWhenStraight.push(up * SHOULDER_WIDTH);
+    }
+  }
+
+  // With the camera below shoulder height, a fist coming forward climbs up
+  // the picture. `rise` is how much: found from the boxer's own straight
+  // punches, which are taken to land at about head height.
+  const rise =
+    fistUpWhenStraight.length >= 5
+      ? Math.max(0, (percentile(fistUpWhenStraight, 0.5) - 0.1) / (FULL_REACH - GUARD_REACH))
+      : 0;
+
+  return {
+    aspect,
+    scaleAt,
+    homeX: percentile(midX, 0.5),
+    standingY: percentile(midY, 0.2),
+    usualHeadUp: percentile(headUp, 0.5),
+    rise,
+  };
+}
+
+// Builds the boxer's joints in the ring at one moment.
+function boxerJoints(joints, model, t) {
+  const { image, world } = joints;
+  const s = model.scaleAt(t);
+  const across = (dx) => (dx / s) * SHOULDER_WIDTH;                  // sideways in the picture -> metres
+  const upward = (dy) => (dy / (s * model.aspect)) * SHOULDER_WIDTH; // up the picture -> metres
+  const midX = (image.leftShoulder.x + image.rightShoulder.x) / 2;
+  const midY = (image.leftShoulder.y + image.rightShoulder.y) / 2;
+
+  // The picture is not mirrored: its right is the boxer's left, which in
+  // the ring (facing +x) is towards -z.
+  const crouch = clamp(upward(midY - model.standingY) * 0.85, -0.05, 0.42);
+  // Boxers lean into a straight punch: the straighter the arm, the more
+  // the chest comes forward with it.
+  const straightest = Math.max(straightness(world, "left"), straightness(world, "right"));
+  const leanIn = 0.1 * ease(clamp((straightest - 0.8) / 0.17, 0, 1));
+  const chest = v(
+    BOXER_X + leanIn + 0.35 * crouch,
+    CHEST_HEIGHT - crouch,
+    -clamp(across(midX - model.homeX), -0.5, 0.5),
+  );
+
+  // Turning: the shoulder further from the camera swings back.
+  const span = length(sub(world.leftShoulder, world.rightShoulder)) || 1;
+  const turn = clamp((world.leftShoulder.z - world.rightShoulder.z) / span, -1, 1) * 0.7;
+  const half = SHOULDER_WIDTH / 2;
+  const j = {
+    leftShoulder: add(chest, v(-half * Math.sin(turn), 0, -half * Math.cos(turn))),
+    rightShoulder: add(chest, v(half * Math.sin(turn), 0, half * Math.cos(turn))),
+  };
+
+  for (const side of ["left", "right"]) {
+    const outward = side === "left" ? -1 : 1;
+    const shoulder = j[side + "Shoulder"];
+    const reach = forwardReach(straightness(world, side));
+    const fistUp = upward(image[side + "Shoulder"].y - image[side + "Wrist"].y);
+    const height = clamp(fistUp - model.rise * (reach - GUARD_REACH), -0.48, 0.4);
+    const sideways = clamp(across(image[side + "Wrist"].x - midX), -0.6, 0.6);
+    let hand = v(chest.x + (shoulder.x - chest.x) * 0.5 + reach, chest.y + height, chest.z - sideways);
+    // An arm cannot be longer than it is.
+    const stretch = sub(hand, shoulder);
+    const most = UPPER_ARM + FOREARM - 0.01;
+    if (length(stretch) > most) hand = add(shoulder, mul(unit(stretch), most));
+
+    // The elbow hangs by the ribs, or lifts out to the side for a hook.
+    const elbowUp = (image[side + "Shoulder"].y - image[side + "Elbow"].y) / (s * model.aspect);
+    const lift = clamp((elbowUp + 0.55) / 0.7, 0, 1);
+    const pole = v(-0.15, -(1 - lift), outward * (0.25 + lift));
+    j[side + "Wrist"] = hand;
+    j[side + "Elbow"] = bend(shoulder, hand, UPPER_ARM, FOREARM, pole);
+  }
+
+  // Hips sit under the chest, following it only half way sideways (the
+  // feet stay planted, so a slip leans the body).
+  // In a duck the hips drop less than the shoulders: the body folds forward.
+  const pelvis = v(BOXER_X - 0.02, HIP_HEIGHT - 0.6 * crouch, chest.z * 0.5);
+  j.leftHip = add(pelvis, v(0, 0, -0.1));
+  j.rightHip = add(pelvis, v(0, 0, 0.1));
+
+  // The head, from where the nose is relative to the shoulders.
+  const headUp = (midY - image.nose.y) / (s * model.aspect);
+  j.head = add(chest, v(
+    0.05,
+    0.2 + clamp((headUp - model.usualHeadUp) * SHOULDER_WIDTH, -0.12, 0.06),
+    -clamp(across(image.nose.x - midX), -0.25, 0.25),
+  ));
   return j;
 }
 
@@ -241,14 +406,6 @@ function skeleton(j, forward, leadSide) {
   return { lines, balls };
 }
 
-// The boxer's skull centre: between the ears when they were seen, else
-// just behind the nose.
-function boxerHead(j) {
-  const ears = mid(j.leftEar, j.rightEar);
-  const fromNose = add(j.nose, v(-0.08, 0, 0));
-  return length(sub(ears, j.nose)) < 0.2 ? lerp3(ears, fromNose, 0.3) : fromNose;
-}
-
 // --- drawing ------------------------------------------------------------------
 const WIDTHS = [1, 1.5, 2, 3, 4, 6, 8, 11, 15, 20];
 const nearestWidth = (w) => WIDTHS.reduce((best, x) => (Math.abs(x - w) < Math.abs(best - w) ? x : best));
@@ -323,16 +480,7 @@ const EVENT_TEXT = {
 export function createReplay(canvas, session) {
   const ctx = canvas.getContext("2d");
 
-  // How low the boxer was, from how far the head dropped in the picture
-  // compared with where it usually sat.
-  const heights = session.frames.map((f) => f.headY).filter((y) => Number.isFinite(y)).sort((a, b) => a - b);
-  const usualHead = heights.length ? heights[Math.floor(heights.length * 0.35)] : 0;
-  const crouchAt = (t) => {
-    const f = frameAt(session, t);
-    if (!f || !Number.isFinite(f.headY)) return 0;
-    return clamp((f.headY - usualHead) * 0.38 * 0.8, -0.05, 0.42);
-  };
-
+  const model = boxerModel(session);
   let lastBoxer = null; // kept so the boxer does not vanish if tracking drops out
 
   return {
@@ -380,11 +528,7 @@ export function createReplay(canvas, session) {
       }
 
       const tracked = jointsAt(session, t);
-      if (tracked) {
-        const j = boxerJoints(tracked, crouchAt(t));
-        j.head = boxerHead(j);
-        lastBoxer = j;
-      }
+      if (tracked) lastBoxer = boxerJoints(tracked, model, t);
       if (lastBoxer) {
         const bones = skeleton(lastBoxer, v(1, 0, 0), session.meta.stance === "southpaw" ? "right" : "left");
         drawLines(ctx, camera, bones.lines, BOXER, glow);

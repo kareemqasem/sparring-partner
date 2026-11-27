@@ -63,6 +63,26 @@ const BASE = {
 export const LEVELS = {
   // The first version: one-second warnings, head shots only, full guard.
   easy: { ...BASE },
+  // Technical sparring: slower than Hard, but it asks for precision. One
+  // target is open at a time and stays open long enough to read and pick;
+  // punching the wrong one is blocked and sometimes answered. Body shots
+  // come in, but no combinations.
+  medium: {
+    ...BASE,
+    guardMinMs: 1200,
+    guardMaxMs: 2400,
+    attackChance: 1,
+    windupMs: 800,
+    recoverMs: 1000,
+    coverUpMs: 800,
+    bodyAttackChance: 0.25,
+    postures: true,
+    shiftMinMs: 1300,
+    shiftMaxMs: 2000,
+    closedChance: 0.15,
+    counterChance: 0.3,
+    counterWindupMs: 500,
+  },
   // Faster, half the warning, body shots, a guard to punch around, counters.
   hard: {
     ...BASE,

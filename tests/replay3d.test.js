@@ -49,7 +49,11 @@ const GUARD = {
   leftWrist: [0.12, -0.55, -0.2], rightWrist: [-0.12, -0.55, -0.2],
   leftHip: [0.1, 0, 0], rightHip: [-0.1, 0, 0],
 };
-const world = () => Object.fromEntries(JOINTS.map((n) => [n, { x: GUARD[n][0], y: GUARD[n][1], z: GUARD[n][2] }]));
+// What the tracker reports: its 3D guess, and where each joint is in the picture.
+const world = () => ({
+  world: Object.fromEntries(JOINTS.map((n) => [n, { x: GUARD[n][0], y: GUARD[n][1], z: GUARD[n][2] }])),
+  image: Object.fromEntries(JOINTS.map((n) => [n, { x: 0.5 + GUARD[n][0] * 0.4, y: 0.75 + GUARD[n][1] * 0.7, visibility: 1 }])),
+});
 
 test("the replay draws every kind of moment, including ones with nobody tracked", () => {
   const recorder = createSession();
@@ -57,7 +61,7 @@ test("the replay draws every kind of moment, including ones with nobody tracked"
   let t = 0;
   for (const state of states) for (const hand of ["left", "right"]) for (const target of ["head", "body"]) for (const open of ["full", "closed", "head", "chest", "liver", "side"]) {
     for (const progress of [0, 0.3, 0.9]) {
-      recorder.frame(t, t % 7 === 0 ? null : world(), 4 + (t % 5) * 0.1, { state, progress, hand, target, open, wasOpen: "closed", shift: 0.5, cover: progress, coverWhere: "body" });
+      recorder.frame(t, t % 7 === 0 ? null : world(), { state, progress, hand, target, open, wasOpen: "closed", shift: 0.5, cover: progress, coverWhere: "body" });
       t += 20;
     }
   }

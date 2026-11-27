@@ -5,13 +5,13 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker } from "./pose.js?v=19";
-import { createMoveDetector } from "./moves.js?v=19";
-import { createOpponent } from "./opponent.js?v=19";
-import { drawOpponent } from "./ring.js?v=19";
-import { drawSkeleton } from "./skeleton.js?v=19";
-import { createSession, pickHighlights } from "./session.js?v=19";
-import { createReplay, highlightPlan } from "./replay3d.js?v=19";
+import { createTracker } from "./pose.js?v=20";
+import { createMoveDetector } from "./moves.js?v=20";
+import { createOpponent } from "./opponent.js?v=20";
+import { drawOpponent } from "./ring.js?v=20";
+import { drawSkeleton } from "./skeleton.js?v=20";
+import { createSession, pickHighlights } from "./session.js?v=20";
+import { createReplay, highlightPlan } from "./replay3d.js?v=20";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -408,9 +408,11 @@ const opponent = createOpponent({
         tone(700, 0.1);
       }
     } else if (event.type === "landed") {
-      flash(event.where && event.where !== "head" && round && round.level === "hard" ? event.where + "!" : "landed!");
+      if (round) round.thrown += 1;
+      flash(event.where && event.where !== "head" && round && round.level !== "easy" ? event.where + "!" : "landed!");
       tone(1760, 0.2, "triangle", 0.5);
     } else if (event.type === "blocked") {
+      if (round) round.thrown += 1;
       tone(300, 0.08, "square", 0.2);
     } else if (event.type === "stopped") {
       endRound("stopped");
@@ -462,8 +464,14 @@ function startRound() {
     startedAt: now,
     endsAt: now + lengthMs,
     lastSecond: null,
+    thrown: 0, // punches thrown at the opponent, landed or blocked
   };
-  recorder = createSession({ mode: round.mode, level: round.level, stance: STANCE });
+  recorder = createSession({
+    mode: round.mode,
+    level: round.level,
+    stance: STANCE,
+    aspect: video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9,
+  });
   closeReplay();
   sparring = true;
   resultsEl.hidden = true;
@@ -508,7 +516,12 @@ function endRound(why) {
   const rows =
     finished.mode === "defense"
       ? [["Avoided", s.avoided], ["Hits taken", s.taken], ["Defence", faced ? Math.round((100 * s.avoided) / faced) + "%" : "-"], ["Lasted", clockText(lasted)]]
-      : [["Landed", s.landed], ["Hits taken", s.taken], ["Avoided", s.avoided], ["Defence", faced ? Math.round((100 * s.avoided) / faced) + "%" : "-"]];
+      : [
+          ["Landed", s.landed],
+          ["Accuracy", finished.thrown ? Math.round((100 * s.landed) / finished.thrown) + "%" : "-"],
+          ["Defence", faced ? Math.round((100 * s.avoided) / faced) + "%" : "-"],
+          ["Hits taken", s.taken],
+        ];
   resultsTitle.textContent = why === "stopped" ? "Round stopped" : "Round over";
   resultsDetail.textContent =
     (finished.mode === "defense" ? "Defense" : "Sparring") + " / " + finished.level + " / " +
@@ -679,6 +692,7 @@ function run(tracker) {
         showMove(move);
       }
       if (sparring) opponent.playerMove(move, now);
+      if (round && recorder) recorder.move(now - round.startedAt, move);
       if (recording && recording.start !== null) {
         recording.moves.push({ t: Math.round(now - recording.start), move });
       }
@@ -705,10 +719,7 @@ function run(tracker) {
       setStatus(describeView(points));
       detector.update(frame, now);
       record(frame, now);
-      if (round && recorder) {
-        const head = detector.head();
-        recorder.frame(now - round.startedAt, frame ? frame.world : null, head ? head.y : NaN, opponent.view(now));
-      }
+      if (round && recorder) recorder.frame(now - round.startedAt, frame, opponent.view(now));
 
       const d = detector.debug();
       const n = (v) => v.toFixed(1);

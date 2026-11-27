@@ -21,21 +21,32 @@ const HIGHLIGHT_WORTH = { landedCounter: 5, landed: 4, slipped: 3, ducked: 3, bl
 export function createSession(meta = {}) {
   const frames = [];
   const events = [];
+  const moves = [];
 
   return {
-    // t is milliseconds since the round began.
-    frame(t, world, headY, view) {
-      let joints = null;
-      if (world) {
-        joints = new Float32Array(JOINTS.length * 3);
+    // t is milliseconds since the round began. `body` is what the tracker
+    // saw: { world, image }, or null if nobody was in view. Both are kept:
+    // `image` is where each joint was in the picture (reliable), `world` is
+    // the tracker's guess at real positions (its depth is weak).
+    frame(t, body, view) {
+      let world = null;
+      let image = null;
+      if (body) {
+        world = new Float32Array(JOINTS.length * 3);
+        image = new Float32Array(JOINTS.length * 3);
         JOINTS.forEach((name, i) => {
-          const p = world[name];
-          joints[i * 3] = p ? p.x : 0;
-          joints[i * 3 + 1] = p ? p.y : 0;
-          joints[i * 3 + 2] = p ? p.z : 0;
+          const w = body.world[name];
+          const m = body.image[name];
+          if (w) world.set([w.x, w.y, w.z], i * 3);
+          if (m) image.set([m.x, m.y, m.visibility ?? 1], i * 3);
         });
       }
-      frames.push({ t, joints, headY, view });
+      frames.push({ t, world, image, view });
+    },
+
+    // A move the boxer was seen to make (jab, slip left, chest shot...).
+    move(t, name) {
+      moves.push({ t, name });
     },
 
     event(t, event) {
@@ -44,7 +55,7 @@ export function createSession(meta = {}) {
     },
 
     finish(score, lengthMs) {
-      return { meta, frames, events, score, lengthMs };
+      return { meta, frames, events, moves, score, lengthMs };
     },
   };
 }
@@ -64,23 +75,31 @@ export function frameAt(session, t) {
 }
 
 // The boxer's joints at time t, averaged over a few neighbouring frames to
-// take the jitter out (depth from a single camera is especially shaky).
+// take the jitter out. Returns { world, image } with a point per joint
+// name, or null if nobody was tracked around then.
 export function jointsAt(session, t, windowMs = 45) {
   const { frames } = session;
   if (frames.length === 0) return null;
   const centre = frames.indexOf(frameAt(session, t));
-  const sum = new Float32Array(JOINTS.length * 3);
+  const size = JOINTS.length * 3;
+  const world = new Float32Array(size);
+  const image = new Float32Array(size);
   let count = 0;
-  for (let i = centre; i >= 0 && t - frames[i].t <= windowMs; i--) {
-    if (frames[i].joints) { for (let k = 0; k < sum.length; k++) sum[k] += frames[i].joints[k]; count++; }
-  }
-  for (let i = centre + 1; i < frames.length && frames[i].t - t <= windowMs; i++) {
-    if (frames[i].joints) { for (let k = 0; k < sum.length; k++) sum[k] += frames[i].joints[k]; count++; }
-  }
+  const take = (f) => {
+    if (!f.world) return;
+    for (let k = 0; k < size; k++) {
+      world[k] += f.world[k];
+      image[k] += f.image[k];
+    }
+    count++;
+  };
+  for (let i = centre; i >= 0 && t - frames[i].t <= windowMs; i--) take(frames[i]);
+  for (let i = centre + 1; i < frames.length && frames[i].t - t <= windowMs; i++) take(frames[i]);
   if (count === 0) return null;
-  const out = {};
+  const out = { world: {}, image: {} };
   JOINTS.forEach((name, i) => {
-    out[name] = { x: sum[i * 3] / count, y: sum[i * 3 + 1] / count, z: sum[i * 3 + 2] / count };
+    out.world[name] = { x: world[i * 3] / count, y: world[i * 3 + 1] / count, z: world[i * 3 + 2] / count };
+    out.image[name] = { x: image[i * 3] / count, y: image[i * 3 + 1] / count, visibility: image[i * 3 + 2] / count };
   });
   return out;
 }

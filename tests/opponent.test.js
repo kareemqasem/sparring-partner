@@ -320,6 +320,33 @@ test("easy: a body punch is just another punch, and the guard has no gaps", () =
   assert.deepEqual(events, ["blocked", "open", "landed"]);
 });
 
+// --- Medium level: technical sparring ---
+
+test("medium: targets stay open longer than on hard, with more warning and no combinations", async () => {
+  const { LEVELS } = await import("../src/opponent.js");
+  const { medium, hard, easy } = LEVELS;
+  assert.ok(medium.postures);
+  assert.ok(medium.shiftMinMs > hard.shiftMaxMs);
+  assert.ok(medium.windupMs > hard.windupMs && medium.windupMs < easy.windupMs);
+  assert.ok(medium.counterWindupMs > hard.counterWindupMs);
+  assert.equal(medium.comboChance, 0);
+  assert.ok(medium.bodyAttackChance > 0 && medium.bodyAttackChance < hard.bodyAttackChance);
+});
+
+test("medium: the wrong target is blocked, the open one lands", () => {
+  const events = [];
+  const opponent = createOpponent({
+    random: scripted([ANY, FROM_CLOSED.liver, ANY]),
+    level: "medium",
+    onEvent: (e) => events.push(e.type + (e.where ? ":" + e.where : "")),
+    config: { counterChance: 0 },
+  });
+  opponent.start(0);
+  opponent.playerMove("jab", 300);
+  opponent.playerMove("liver shot", 900);
+  assert.deepEqual(events, ["shift", "blocked:head", "landed:liver"]);
+});
+
 // --- Defense mode: it only attacks, and builds up over the round ---
 
 function defense(overrides = {}, randomValues = [ANY]) {
