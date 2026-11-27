@@ -14,6 +14,7 @@ const readout = document.getElementById("readout");
 const movesEl = document.getElementById("moves");
 const flashEl = document.getElementById("flash");
 const recordBtn = document.getElementById("record");
+const guidedBtn = document.getElementById("guided");
 const debugEl = document.getElementById("debug");
 
 const MIN_VISIBILITY = 0.5;
@@ -109,16 +110,52 @@ function describeView(points) {
   return "Can't see everything yet. Step back and keep your hands up.";
 }
 
-// Recording: saves 15 seconds of tracked points to a file, so the move
-// recognition can be tuned on real punches. It saves numbers only, no video.
+// Recording: saves tracked points to a file, so the move recognition can
+// be tuned on real punches. It saves numbers only, no video.
+//
+// A guided recording also calls out a move every few seconds and saves
+// which move was asked for when. That is the answer key for tuning.
 const RECORD_COUNTDOWN_MS = 5000;
-const RECORD_LENGTH_MS = 15000;
+const FREE_LENGTH_MS = 15000;
+const CUE_GAP_MS = 2500;
+const GUIDED_ROUNDS = 4;
+const GUIDED_MOVES = ["jab", "cross", "left hook", "right hook", "slip left", "slip right", "block"];
+
 let recording = null;
 
-const round = (v) => Math.round(v * 10000) / 10000;
+function guidedCues() {
+  const cues = [];
+  let t = 2000; // two quiet seconds in guard first
+  for (let round = 0; round < GUIDED_ROUNDS; round++) {
+    for (const move of GUIDED_MOVES) {
+      cues.push({ t, move });
+      t += CUE_GAP_MS;
+    }
+  }
+  return { cues, lengthMs: t + 500 };
+}
+
+function startRecording(guided) {
+  const plan = guided ? guidedCues() : { cues: [], lengthMs: FREE_LENGTH_MS };
+  recording = {
+    guided,
+    start: performance.now() + RECORD_COUNTDOWN_MS,
+    lengthMs: plan.lengthMs,
+    cues: plan.cues,
+    nextCue: 0,
+    frames: [],
+    moves: [],
+    announced: false,
+  };
+  recordBtn.disabled = true;
+  guidedBtn.disabled = true;
+}
+
+const round = (v) => Math.round(v * 1000) / 1000;
 function compact(points) {
   const out = {};
   for (const [name, p] of Object.entries(points)) {
+    if (name.endsWith("Hip")) continue;
     out[name] = [round(p.x), round(p.y), round(p.z), round(p.visibility ?? 1)];
   }
   return out;
@@ -133,10 +170,23 @@ function record(frame, now) {
   }
   if (!recording.announced) {
     recording.announced = true;
-    say("Go");
-    flash("go");
+    if (!recording.guided) {
+      say("Go");
+      flash("go");
+    }
   }
-  if (elapsed <= RECORD_LENGTH_MS) {
+
+  if (elapsed <= recording.lengthMs) {
+    const cue = recording.cues[recording.nextCue];
+    if (cue && elapsed >= cue.t) {
+      recording.nextCue += 1;
+      say(cue.move);
+      flash(cue.move);
+    }
+    if (recording.guided) {
+      setStatus("Do each move once when you hear it, then return to guard. " +
+        recording.nextCue + " of " + recording.cues.length + ".");
+    }
     recording.frames.push(
       frame
         ? { t: Math.round(elapsed), image: compact(frame.image), world: compact(frame.world) }
@@ -147,37 +197,38 @@ function record(frame, now) {
 
   const data = {
     recordedAt: new Date().toISOString(),
+    guided: recording.guided,
+    stance: STANCE,
     video: { width: video.videoWidth, height: video.videoHeight },
+    cues: recording.cues,
     moves: recording.moves,
     frames: recording.frames,
   };
+  const name = recording.guided ? "sparring-guided-recording.json" : "sparring-recording.json";
   recording = null;
   say("Done");
   flash("done");
 
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
-  link.download = "sparring-recording.json";
+  link.download = name;
   link.click();
   recordBtn.disabled = false;
+  guidedBtn.disabled = false;
 }
 
-recordBtn.addEventListener("click", () => {
-  recordBtn.disabled = true;
-  recording = {
-    start: performance.now() + RECORD_COUNTDOWN_MS,
-    frames: [],
-    moves: [],
-    announced: false,
-  };
-});
+recordBtn.addEventListener("click", () => startRecording(false));
+guidedBtn.addEventListener("click", () => startRecording(true));
 
 function run(tracker) {
   const detector = createMoveDetector({
     stance: STANCE,
     onMove(move) {
-      say(move);
-      flash(move);
+      // During a guided recording the voice belongs to the call-outs.
+      if (!(recording && recording.guided)) {
+        say(move);
+        flash(move);
+      }
       showMove(move);
       if (recording) recording.moves.push({ t: Math.round(performance.now() - recording.start), move });
     },
@@ -240,6 +291,7 @@ startBtn.addEventListener("click", async () => {
     const tracker = await createTracker();
     startBtn.hidden = true;
     recordBtn.hidden = false;
+    guidedBtn.hidden = false;
     say("Ready");
     flash("ready");
     run(tracker);
