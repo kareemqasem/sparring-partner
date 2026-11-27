@@ -5,8 +5,8 @@
 // (all the "?v=" numbers and the "Version" line), so browsers load the new
 // files instead of old saved copies.
 
-import { createTracker, BONES } from "./pose.js?v=6";
-import { createMoveDetector } from "./moves.js?v=6";
+import { createTracker, BONES } from "./pose.js?v=7";
+import { createMoveDetector } from "./moves.js?v=7";
 
 const video = document.getElementById("camera");
 const canvas = document.getElementById("overlay");
@@ -19,6 +19,8 @@ const movesEl = document.getElementById("moves");
 const flashEl = document.getElementById("flash");
 const recordBtn = document.getElementById("record");
 const guidedBtn = document.getElementById("guided");
+const punchesBtn = document.getElementById("punches");
+const recordButtons = [recordBtn, guidedBtn, punchesBtn];
 const debugEl = document.getElementById("debug");
 
 const MIN_VISIBILITY = 0.5;
@@ -122,16 +124,28 @@ function describeView(points) {
 const RECORD_COUNTDOWN_MS = 5000;
 const FREE_LENGTH_MS = 15000;
 const CUE_GAP_MS = 2500;
-const GUIDED_ROUNDS = 4;
-const GUIDED_MOVES = ["jab", "cross", "left hook", "right hook", "slip left", "slip right", "block"];
+// Each guided recording is a list of moves called out in order, several times round.
+const DRILLS = {
+  all: {
+    rounds: 4,
+    moves: ["jab", "cross", "left hook", "right hook", "slip left", "slip right", "block"],
+    file: "sparring-guided-recording.json",
+  },
+  // Punches only, in an order that puts the easily confused ones side by side.
+  punches: {
+    rounds: 4,
+    moves: ["jab", "left hook", "cross", "right hook", "left hook", "jab", "right hook", "cross"],
+    file: "sparring-punch-recording.json",
+  },
+};
 
 let recording = null;
 
-function guidedCues() {
+function guidedCues(drill) {
   const cues = [];
   let t = 2000; // two quiet seconds in guard first
-  for (let round = 0; round < GUIDED_ROUNDS; round++) {
-    for (const move of GUIDED_MOVES) {
+  for (let round = 0; round < drill.rounds; round++) {
+    for (const move of drill.moves) {
       cues.push({ t, move });
       t += CUE_GAP_MS;
     }
@@ -139,10 +153,14 @@ function guidedCues() {
   return { cues, lengthMs: t + 500 };
 }
 
-function startRecording(guided) {
-  const plan = guided ? guidedCues() : { cues: [], lengthMs: FREE_LENGTH_MS };
+function startRecording(drillName) {
+  const drill = DRILLS[drillName];
+  const guided = Boolean(drill);
+  const plan = guided ? guidedCues(drill) : { cues: [], lengthMs: FREE_LENGTH_MS };
   recording = {
     guided,
+    drill: drillName,
+    file: guided ? drill.file : "sparring-recording.json",
     start: performance.now() + RECORD_COUNTDOWN_MS,
     lengthMs: plan.lengthMs,
     cues: plan.cues,
@@ -151,8 +169,7 @@ function startRecording(guided) {
     moves: [],
     announced: false,
   };
-  recordBtn.disabled = true;
-  guidedBtn.disabled = true;
+  for (const button of recordButtons) button.disabled = true;
 }
 
 const round = (v) => Math.round(v * 1000) / 1000;
@@ -202,13 +219,14 @@ function record(frame, now) {
   const data = {
     recordedAt: new Date().toISOString(),
     guided: recording.guided,
+    drill: recording.drill,
     stance: STANCE,
     video: { width: video.videoWidth, height: video.videoHeight },
     cues: recording.cues,
     moves: recording.moves,
     frames: recording.frames,
   };
-  const name = recording.guided ? "sparring-guided-recording.json" : "sparring-recording.json";
+  const name = recording.file;
   recording = null;
   say("Done");
   flash("done");
@@ -217,12 +235,12 @@ function record(frame, now) {
   link.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
   link.download = name;
   link.click();
-  recordBtn.disabled = false;
-  guidedBtn.disabled = false;
+  for (const button of recordButtons) button.disabled = false;
 }
 
-recordBtn.addEventListener("click", () => startRecording(false));
-guidedBtn.addEventListener("click", () => startRecording(true));
+recordBtn.addEventListener("click", () => startRecording(null));
+guidedBtn.addEventListener("click", () => startRecording("all"));
+punchesBtn.addEventListener("click", () => startRecording("punches"));
 
 function run(tracker) {
   const detector = createMoveDetector({
@@ -294,8 +312,7 @@ startBtn.addEventListener("click", async () => {
     setStatus("Loading body tracking. The first time takes a few seconds...");
     const tracker = await createTracker();
     startBtn.hidden = true;
-    recordBtn.hidden = false;
-    guidedBtn.hidden = false;
+    for (const button of recordButtons) button.hidden = false;
     say("Ready");
     flash("ready");
     run(tracker);

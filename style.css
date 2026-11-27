@@ -101,7 +101,8 @@ button:disabled {
 #flash.on { opacity: 1; }
 
 #record,
-#guided { background: #3a3d46; }
+#guided,
+#punches { background: #3a3d46; }
 
 #controls { flex-wrap: wrap; }
 
