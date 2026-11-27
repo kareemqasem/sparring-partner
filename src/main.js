@@ -12,6 +12,9 @@ const startBtn = document.getElementById("start");
 const readout = document.getElementById("readout");
 
 const movesEl = document.getElementById("moves");
+const flashEl = document.getElementById("flash");
+const recordBtn = document.getElementById("record");
+const debugEl = document.getElementById("debug");
 
 const MIN_VISIBILITY = 0.5;
 const STANCE = "orthodox";
@@ -20,10 +23,25 @@ const STANCE = "orthodox";
 // voice keeps up with fast combinations.
 function say(text) {
   if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
+  const synth = window.speechSynthesis;
   const words = new SpeechSynthesisUtterance(text);
   words.rate = 1.4;
-  window.speechSynthesis.speak(words);
+  if (synth.speaking || synth.pending) {
+    // Some browsers drop a call-out made straight after a cancel.
+    synth.cancel();
+    setTimeout(() => synth.speak(words), 0);
+  } else {
+    synth.speak(words);
+  }
+}
+
+// Shows the move in large letters over the video for a moment.
+let flashTimer = null;
+function flash(text) {
+  flashEl.textContent = text;
+  flashEl.classList.add("on");
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => flashEl.classList.remove("on"), 700);
 }
 
 const recentMoves = [];
@@ -91,12 +109,77 @@ function describeView(points) {
   return "Can't see everything yet. Step back and keep your hands up.";
 }
 
+// Recording: saves 15 seconds of tracked points to a file, so the move
+// recognition can be tuned on real punches. It saves numbers only, no video.
+const RECORD_COUNTDOWN_MS = 5000;
+const RECORD_LENGTH_MS = 15000;
+let recording = null;
+
+const round = (v) => Math.round(v * 10000) / 10000;
+function compact(points) {
+  const out = {};
+  for (const [name, p] of Object.entries(points)) {
+    out[name] = [round(p.x), round(p.y), round(p.z), round(p.visibility ?? 1)];
+  }
+  return out;
+}
+
+function record(frame, now) {
+  if (!recording) return;
+  const elapsed = now - recording.start;
+  if (elapsed < 0) {
+    setStatus("Recording starts in " + Math.ceil(-elapsed / 1000) + "... get into your guard.");
+    return;
+  }
+  if (!recording.announced) {
+    recording.announced = true;
+    say("Go");
+    flash("go");
+  }
+  if (elapsed <= RECORD_LENGTH_MS) {
+    recording.frames.push(
+      frame
+        ? { t: Math.round(elapsed), image: compact(frame.image), world: compact(frame.world) }
+        : { t: Math.round(elapsed) },
+    );
+    return;
+  }
+
+  const data = {
+    recordedAt: new Date().toISOString(),
+    video: { width: video.videoWidth, height: video.videoHeight },
+    moves: recording.moves,
+    frames: recording.frames,
+  };
+  recording = null;
+  say("Done");
+  flash("done");
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
+  link.download = "sparring-recording.json";
+  link.click();
+  recordBtn.disabled = false;
+}
+
+recordBtn.addEventListener("click", () => {
+  recordBtn.disabled = true;
+  recording = {
+    start: performance.now() + RECORD_COUNTDOWN_MS,
+    frames: [],
+    moves: [],
+    announced: false,
+  };
+});
+
 function run(tracker) {
   const detector = createMoveDetector({
     stance: STANCE,
     onMove(move) {
       say(move);
+      flash(move);
       showMove(move);
+      if (recording) recording.moves.push({ t: Math.round(performance.now() - recording.start), move });
     },
   });
 
@@ -113,6 +196,13 @@ function run(tracker) {
       draw(points);
       setStatus(describeView(points));
       detector.update(frame, now);
+      record(frame, now);
+
+      const d = detector.debug();
+      const n = (v) => v.toFixed(1);
+      debugEl.textContent =
+        "Left hand: speed " + n(d.left.speed) + ", reach " + n(d.left.reach) +
+        "   Right hand: speed " + n(d.right.speed) + ", reach " + n(d.right.reach);
 
       frames += 1;
       const elapsed = performance.now() - fpsStart;
@@ -149,7 +239,9 @@ startBtn.addEventListener("click", async () => {
     setStatus("Loading body tracking. The first time takes a few seconds...");
     const tracker = await createTracker();
     startBtn.hidden = true;
+    recordBtn.hidden = false;
     say("Ready");
+    flash("ready");
     run(tracker);
   } catch (err) {
     console.error(err);

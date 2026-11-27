@@ -81,3 +81,30 @@ button:disabled {
   font-size: 20px;
   font-weight: 600;
 }
+
+#flash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(48px, 14vw, 160px);
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 0 24px #000, 0 0 8px #000;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+#flash.on { opacity: 1; }
+
+#record { background: #3a3d46; }
+
+#debug {
+  margin: 8px 0 0;
+  color: #8b8e97;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}

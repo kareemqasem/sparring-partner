@@ -16,14 +16,17 @@
     <div id="stage">
       <video id="camera" playsinline muted></video>
       <canvas id="overlay"></canvas>
+      <div id="flash"></div>
     </div>
 
     <div id="controls">
       <button id="start" type="button">Start camera</button>
+      <button id="record" type="button" hidden>Record 15 seconds</button>
       <span id="readout"></span>
     </div>
 
     <p id="moves" aria-live="off"></p>
+    <p id="debug"></p>
   </main>
 
   <script type="module" src="src/main.js"></script>

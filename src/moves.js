@@ -33,7 +33,7 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
   const T = { ...TUNING, ...tuning };
   const seen = (p) => p && (p.visibility ?? 1) >= T.minVisibility;
 
-  const newHand = () => ({ history: [], strike: null, cooldownUntil: 0 });
+  const newHand = () => ({ history: [], strike: null, cooldownUntil: 0, speed: 0, reach: 0 });
   const hands = { left: newHand(), right: newHand() };
 
   let headHome = null;
@@ -75,6 +75,8 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
     if (!seen(shoulder) || !seen(elbow) || !seen(wrist)) {
       hand.history = [];
       hand.strike = null;
+      hand.speed = 0;
+      hand.reach = 0;
       return;
     }
 
@@ -95,6 +97,8 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
     const seconds = (time - oldest.time) / 1000;
     if (seconds < 0.02) return;
     const speed = dist(rel, oldest.rel) / seconds / shoulderWidth;
+    hand.speed = speed;
+    hand.reach = reach;
 
     if (!hand.strike) {
       if (speed >= T.strikeStartSpeed && time >= hand.cooldownUntil) {
@@ -186,5 +190,10 @@ export function createMoveDetector({ stance = "orthodox", onMove = () => {}, tun
       updateBlock(image, time);
     },
     isBlocking: () => blocking,
+    // Live numbers for tuning: how fast and how straight each arm is.
+    debug: () => ({
+      left: { speed: hands.left.speed, reach: hands.left.reach },
+      right: { speed: hands.right.speed, reach: hands.right.reach },
+    }),
   };
 }

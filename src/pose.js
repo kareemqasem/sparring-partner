@@ -10,7 +10,7 @@ import {
 const WASM_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
 
 // Indexes of the points boxing cares about, in MediaPipe's numbering.
 export const POINTS = {
@@ -64,7 +64,12 @@ export async function createTracker() {
       const image = result.landmarks && result.landmarks[0];
       const world = result.worldLandmarks && result.worldLandmarks[0];
       if (!image || !world) return null;
-      return { image: pick(image), world: pick(world) };
+      const frame = { image: pick(image), world: pick(world) };
+      // Trust the picture's "can I see this point" score for both sets.
+      for (const name of Object.keys(POINTS)) {
+        frame.world[name] = { ...frame.world[name], visibility: frame.image[name].visibility };
+      }
+      return frame;
     },
   };
 }
